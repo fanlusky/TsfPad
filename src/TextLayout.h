@@ -63,6 +63,10 @@ class CTextLayout
         _lineHeightDips = 0.0f;
         _dpiX = 96.0f;
         _dpiY = 96.0f;
+        _paddingLeftDips = 0.0f;
+        _paddingTopDips = 0.0f;
+        _paddingRightDips = 0.0f;
+        _paddingBottomDips = 0.0f;
         _rcCaret = D2D1::RectF();
     }
 
@@ -94,6 +98,22 @@ class CTextLayout
     {
         return _fInterimCaret;
     }
+    LONG GetPaddingLeftPixels() const
+    {
+        return DipsToPixelsX(_paddingLeftDips);
+    }
+    LONG GetPaddingTopPixels() const
+    {
+        return DipsToPixelsY(_paddingTopDips);
+    }
+    LONG GetPaddingRightPixels() const
+    {
+        return DipsToPixelsX(_paddingRightDips);
+    }
+    LONG GetPaddingBottomPixels() const
+    {
+        return DipsToPixelsY(_paddingBottomDips);
+    }
 
     int GetLineHeight()
     {
@@ -120,6 +140,10 @@ class CTextLayout
     FLOAT _layoutWidth;
     FLOAT _dpiX;
     FLOAT _dpiY;
+    FLOAT _paddingLeftDips;
+    FLOAT _paddingTopDips;
+    FLOAT _paddingRightDips;
+    FLOAT _paddingBottomDips;
 
     LINEINFO *_prgLines;
     UINT _nLineCnt;

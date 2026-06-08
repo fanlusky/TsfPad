@@ -423,8 +423,8 @@ STDAPI CTextStore::GetTextExt(TsViewCookie vcView, LONG acpStart, LONG acpEnd, R
         {
             RECT rcClient;
             GetClientRect(_pEditor->GetWnd(), &rcClient);
-            prc->left = rcClient.left;
-            prc->right = rcClient.right;
+            prc->left = _pEditor->GetLayout()->GetPaddingLeftPixels();
+            prc->right = max(prc->left, rcClient.right - _pEditor->GetLayout()->GetPaddingRightPixels());
         }
         prc->top = min(rcStart.top, rcEnd.top);
         prc->bottom = max(rcStart.bottom, rcEnd.bottom);

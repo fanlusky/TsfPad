@@ -23,7 +23,7 @@ ATOM CTextInputCtrl::RegisterClass(HINSTANCE hInstance)
     wcex.cbWndExtra = 0;
     wcex.hInstance = hInstance;
     wcex.hIcon = NULL;
-    wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wcex.hCursor = LoadCursor(NULL, IDC_IBEAM);
     wcex.hbrBackground = NULL;
     wcex.lpszMenuName = NULL;
     wcex.lpszClassName = TEXTINPUTCTRL_CLASSNAME;

@@ -4,6 +4,9 @@
 
 namespace
 {
+constexpr FLOAT kEditorPaddingPixels = 3.0f;
+constexpr FLOAT kCaretWidthPixels = 2.0f;
+
 float DipsFromLogFontHeight(const LOGFONT *plf, FLOAT dpiY)
 {
     LONG logicalHeight = plf ? plf->lfHeight : 0;
@@ -81,7 +84,11 @@ BOOL CTextLayout::Layout(const WCHAR *psz, UINT nCnt, const LOGFONT *plf, FLOAT 
 
     _dpiX = max(dpiX, 1.0f);
     _dpiY = max(dpiY, 1.0f);
-    _layoutWidth = max(PixelsToDipsX(layoutWidthPixels), 1.0f);
+    _paddingLeftDips = PixelsToDipsX(kEditorPaddingPixels);
+    _paddingTopDips = PixelsToDipsY(kEditorPaddingPixels);
+    _paddingRightDips = PixelsToDipsX(kEditorPaddingPixels);
+    _paddingBottomDips = PixelsToDipsY(kEditorPaddingPixels);
+    _layoutWidth = max(PixelsToDipsX(layoutWidthPixels) - _paddingLeftDips - _paddingRightDips, 1.0f);
 
     UINT i = 0;
     BOOL bNewLine = TRUE;
@@ -204,10 +211,10 @@ BOOL CTextLayout::Layout(const WCHAR *psz, UINT nCnt, const LOGFONT *plf, FLOAT 
             }
 
             D2D1_RECT_F &rc = line.prgCharInfo[j].rc;
-            rc.left = hitX;
-            rc.top = yOffset + hitY;
-            rc.right = hitX + hitMetrics.width;
-            rc.bottom = yOffset + hitMetrics.height;
+            rc.left = _paddingLeftDips + hitX;
+            rc.top = _paddingTopDips + yOffset + hitY;
+            rc.right = _paddingLeftDips + hitX + hitMetrics.width;
+            rc.bottom = _paddingTopDips + yOffset + hitMetrics.height;
             if (rc.right <= rc.left)
             {
                 rc.right = rc.left + (1.0f * 96.0f / _dpiX);
@@ -291,8 +298,8 @@ BOOL CTextLayout::Render(ID2D1HwndRenderTarget *pRenderTarget, const WCHAR *psz,
         const LINEINFO &line = _prgLines[i];
         if (line.pTextLayout)
         {
-            const FLOAT top = line.nCnt ? line.prgCharInfo[0].rc.top : (i * _lineHeightDips);
-            pRenderTarget->DrawTextLayout(D2D1::Point2F(0.0f, top), line.pTextLayout, pTextBrush,
+            const FLOAT top = line.nCnt ? line.prgCharInfo[0].rc.top : (_paddingTopDips + i * _lineHeightDips);
+            pRenderTarget->DrawTextLayout(D2D1::Point2F(_paddingLeftDips, top), line.pTextLayout, pTextBrush,
                                           D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
         }
     }
@@ -349,10 +356,10 @@ BOOL CTextLayout::Render(ID2D1HwndRenderTarget *pRenderTarget, const WCHAR *psz,
 
     if (_nLineCnt == 0)
     {
-        _rcCaret.left = 0.0f;
-        _rcCaret.top = 0.0f;
-        _rcCaret.right = PixelsToDipsX(1.0f);
-        _rcCaret.bottom = _lineHeightDips;
+        _rcCaret.left = _paddingLeftDips;
+        _rcCaret.top = _paddingTopDips;
+        _rcCaret.right = _paddingLeftDips + PixelsToDipsX(kCaretWidthPixels);
+        _rcCaret.bottom = _paddingTopDips + _lineHeightDips;
     }
     else if (nSelStart == nSelEnd)
     {
@@ -362,7 +369,8 @@ BOOL CTextLayout::Render(ID2D1HwndRenderTarget *pRenderTarget, const WCHAR *psz,
     if ((nSelStart == nSelEnd) && (_fInterimCaret || _fCaretVisible))
     {
         pRenderTarget->FillRectangle(
-            D2D1::RectF(_rcCaret.left, _rcCaret.top, max(_rcCaret.right, _rcCaret.left + PixelsToDipsX(1.0f)),
+            D2D1::RectF(_rcCaret.left, _rcCaret.top,
+                        max(_rcCaret.right, _rcCaret.left + PixelsToDipsX(kCaretWidthPixels)),
                          _rcCaret.bottom),
             pCaretBrush);
     }
@@ -444,7 +452,9 @@ BOOL CTextLayout::RectFromCharPosDips(UINT nPos, D2D1_RECT_F *prc)
         return TRUE;
     }
 
-    prc->top = _nLineCnt * _lineHeightDips;
+    prc->left = _paddingLeftDips;
+    prc->right = _paddingLeftDips + PixelsToDipsX(kCaretWidthPixels);
+    prc->top = _paddingTopDips + (_nLineCnt * _lineHeightDips);
     prc->bottom = prc->top + _lineHeightDips;
     return TRUE;
 }
