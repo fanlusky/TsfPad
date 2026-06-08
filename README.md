@@ -31,6 +31,11 @@ python .\scripts\prepare_env.py
 .\build\bin\Debug\TsfPad.exe
 ```
 
+## TODO
+
+- 支持 soft wrap
+- 支持编辑框应该支持的一些正常的命令，比如，Ctrl + A 是全选、按住 Ctrl 去删除可以一次删除一整个词。
+
 ## References
 
 - <https://github.com/microsoft/Windows-classic-samples/tree/main/Samples/Win7Samples/winui/input/tsf/tsfapps/tsfpad-step4>
