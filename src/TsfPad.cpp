@@ -127,6 +127,12 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
+    const int windowWidth = 1200;
+    const int windowHeight = 900;
+    const int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+    const int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    const int windowX = max(0, (screenWidth - windowWidth) / 2);
+    const int windowY = max(0, (screenHeight - windowHeight) / 2);
 
     g_hInst = hInstance; // Store instance handle in our global variable
 
@@ -134,10 +140,10 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
         szWindowClass,       //
         szTitle,             //
         WS_OVERLAPPEDWINDOW, //
-        CW_USEDEFAULT,       //
-        0,                   //
-        1200,                 //
-        900,                 //
+        windowX,             //
+        windowY,             //
+        windowWidth,         //
+        windowHeight,        //
         NULL,                //
         NULL,                //
         hInstance,           //
