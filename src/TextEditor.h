@@ -91,7 +91,7 @@ class CTextEditor : public CTextContainer
 
     void InvalidateRect()
     {
-        ::InvalidateRect(_hwnd, NULL, TRUE);
+        ::InvalidateRect(_hwnd, NULL, FALSE);
     }
 
     int GetLineHeight()

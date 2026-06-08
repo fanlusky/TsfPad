@@ -24,7 +24,7 @@ ATOM CTextInputCtrl::RegisterClass(HINSTANCE hInstance)
     wcex.hInstance = hInstance;
     wcex.hIcon = NULL;
     wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wcex.hbrBackground = NULL;
     wcex.lpszMenuName = NULL;
     wcex.lpszClassName = TEXTINPUTCTRL_CLASSNAME;
     wcex.hIconSm = NULL;
@@ -86,6 +86,9 @@ LRESULT CALLBACK CTextInputCtrl::s_WndProc(HWND hwnd, UINT message, WPARAM wPara
             ptic->OnPaint();
         EndPaint(hwnd, &ps);
         break;
+
+    case WM_ERASEBKGND:
+        return 1;
 
     case WM_SIZE:
         ptic = GetThis(hwnd);
@@ -194,7 +197,7 @@ LRESULT CALLBACK CTextInputCtrl::s_WndProc(HWND hwnd, UINT message, WPARAM wPara
             wc[0] = (WCHAR)wParam;
             wc[1] = L'\0';
             ptic->_editor.InsertAtSelection(wc);
-            InvalidateRect(hwnd, NULL, TRUE);
+            InvalidateRect(hwnd, NULL, FALSE);
         }
         break;
 
@@ -205,7 +208,7 @@ LRESULT CALLBACK CTextInputCtrl::s_WndProc(HWND hwnd, UINT message, WPARAM wPara
             if (ptic)
             {
                 ptic->_editor.BlinkCaret();
-                InvalidateRect(hwnd, NULL, TRUE);
+                InvalidateRect(hwnd, NULL, FALSE);
             }
         }
 
@@ -362,7 +365,7 @@ void CTextInputCtrl::OnKeyDown(WPARAM wParam, LPARAM lParam)
         {
             _editor.MoveSelectionPrev();
         }
-        InvalidateRect(_hwnd, NULL, TRUE);
+        InvalidateRect(_hwnd, NULL, FALSE);
         break;
 
     case VK_RIGHT:
@@ -376,27 +379,27 @@ void CTextInputCtrl::OnKeyDown(WPARAM wParam, LPARAM lParam)
         {
             _editor.MoveSelectionNext();
         }
-        InvalidateRect(_hwnd, NULL, TRUE);
+        InvalidateRect(_hwnd, NULL, FALSE);
         break;
 
     case VK_UP:
         _editor.MoveSelectionUpDown(TRUE);
-        InvalidateRect(_hwnd, NULL, TRUE);
+        InvalidateRect(_hwnd, NULL, FALSE);
         break;
 
     case VK_DOWN:
         _editor.MoveSelectionUpDown(FALSE);
-        InvalidateRect(_hwnd, NULL, TRUE);
+        InvalidateRect(_hwnd, NULL, FALSE);
         break;
 
     case VK_HOME:
         _editor.MoveSelectionToLineFirstEnd(TRUE);
-        InvalidateRect(_hwnd, NULL, TRUE);
+        InvalidateRect(_hwnd, NULL, FALSE);
         break;
 
     case VK_END:
         _editor.MoveSelectionToLineFirstEnd(FALSE);
-        InvalidateRect(_hwnd, NULL, TRUE);
+        InvalidateRect(_hwnd, NULL, FALSE);
         break;
 
     case VK_DELETE:
@@ -410,7 +413,7 @@ void CTextInputCtrl::OnKeyDown(WPARAM wParam, LPARAM lParam)
         {
             _editor.DeleteSelection();
         }
-        InvalidateRect(_hwnd, NULL, TRUE);
+        InvalidateRect(_hwnd, NULL, FALSE);
         break;
 
     case VK_BACK:
@@ -424,7 +427,7 @@ void CTextInputCtrl::OnKeyDown(WPARAM wParam, LPARAM lParam)
         {
             _editor.DeleteSelection();
         }
-        InvalidateRect(_hwnd, NULL, TRUE);
+        InvalidateRect(_hwnd, NULL, FALSE);
         break;
     }
 }
@@ -486,7 +489,7 @@ void CTextInputCtrl::OnLButtonDown(WPARAM wParam, LPARAM lParam)
     pt.y = GET_Y_LPARAM(lParam);
     if (_editor.MoveSelectionAtPoint(pt))
     {
-        InvalidateRect(_hwnd, NULL, TRUE);
+        InvalidateRect(_hwnd, NULL, FALSE);
         _uSelDragStart = _editor.GetSelectionStart();
     }
 }
@@ -514,7 +517,7 @@ void CTextInputCtrl::OnLButtonUp(WPARAM wParam, LPARAM lParam)
         UINT nNewSelStart = _editor.GetSelectionStart();
         UINT nNewSelEnd = _editor.GetSelectionEnd();
         _editor.MoveSelection(min(nSelStart, nNewSelStart), max(nSelEnd, nNewSelEnd));
-        InvalidateRect(_hwnd, NULL, TRUE);
+        InvalidateRect(_hwnd, NULL, FALSE);
     }
 }
 
@@ -569,7 +572,7 @@ void CTextInputCtrl::OnMouseMove(WPARAM wParam, LPARAM lParam)
             UINT nNewSelStart = _editor.GetSelectionStart();
             UINT nNewSelEnd = _editor.GetSelectionEnd();
             _editor.MoveSelection(min(_uSelDragStart, nNewSelStart), max(_uSelDragStart, nNewSelEnd));
-            InvalidateRect(_hwnd, NULL, TRUE);
+            InvalidateRect(_hwnd, NULL, FALSE);
         }
     }
 }
@@ -603,7 +606,7 @@ void CTextInputCtrl::SetFont(HWND hwndParent)
     {
         _lfCurrentFont = lf;
         _editor.SetFont(&_lfCurrentFont);
-        InvalidateRect(_hwnd, NULL, TRUE);
+        InvalidateRect(_hwnd, NULL, FALSE);
     }
 }
 
