@@ -90,147 +90,134 @@ BOOL CTextLayout::Layout(const WCHAR *psz, UINT nCnt, const LOGFONT *plf, FLOAT 
     _paddingBottomDips = PixelsToDipsY(kEditorPaddingPixels);
     _layoutWidth = max(PixelsToDipsX(layoutWidthPixels) - _paddingLeftDips - _paddingRightDips, 1.0f);
 
-    UINT i = 0;
-    BOOL bNewLine = TRUE;
-    _nLineCnt = 0;
-    for (i = 0; i < nCnt; i++)
+    const WCHAR *layoutText = psz ? psz : L"";
+    UINT layoutLength = nCnt;
+    BOOL usesPlaceholder = FALSE;
+    if (layoutLength == 0)
     {
-        switch (psz[i])
-        {
-        case 0x0d:
-        case 0x0a:
-            bNewLine = TRUE;
-            break;
-        default:
-            if (bNewLine)
-            {
-                _nLineCnt++;
-            }
-            bNewLine = FALSE;
-            break;
-        }
+        layoutText = L" ";
+        layoutLength = 1;
+        usesPlaceholder = TRUE;
     }
 
-    if (_nLineCnt == 0)
-    {
-        IDWriteTextLayout *pEmptyLayout = NULL;
-        if (FAILED(_pDWriteFactory->CreateTextLayout(L" ", 1, _pTextFormat, _layoutWidth, 4096.0f, &pEmptyLayout)))
-        {
-            return FALSE;
-        }
-
-        DWRITE_TEXT_METRICS metrics = {};
-        const HRESULT hrMetrics = pEmptyLayout->GetMetrics(&metrics);
-        pEmptyLayout->Release();
-        if (FAILED(hrMetrics))
-        {
-            return FALSE;
-        }
-
-        _lineHeightDips = max(metrics.height, 1.0f);
-        _nLineHeight = max(1L, DipsToPixelsY(_lineHeightDips));
-        return TRUE;
-    }
-
-    _prgLines = static_cast<LINEINFO *>(LocalAlloc(LPTR, _nLineCnt * sizeof(LINEINFO)));
-    if (!_prgLines)
+    if (FAILED(_pDWriteFactory->CreateTextLayout(layoutText, layoutLength, _pTextFormat, _layoutWidth, 100000.0f,
+                                                 &_pTextLayout)))
     {
         return FALSE;
     }
 
-    bNewLine = TRUE;
-    int nCurrentLine = -1;
-    for (i = 0; i < nCnt; i++)
+    _pTextLayout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+
+    DWRITE_TEXT_METRICS textMetrics = {};
+    if (FAILED(_pTextLayout->GetMetrics(&textMetrics)))
     {
-        switch (psz[i])
-        {
-        case 0x0d:
-        case 0x0a:
-            bNewLine = TRUE;
-            break;
-        default:
-            if (bNewLine)
-            {
-                nCurrentLine++;
-                _prgLines[nCurrentLine].nPos = i;
-                _prgLines[nCurrentLine].nCnt = 1;
-            }
-            else
-            {
-                _prgLines[nCurrentLine].nCnt++;
-            }
-            bNewLine = FALSE;
-            break;
-        }
+        Clear();
+        return FALSE;
     }
 
-    FLOAT yOffset = 0.0f;
+    UINT32 actualLineCount = 0;
+    if (_pTextLayout->GetLineMetrics(NULL, 0, &actualLineCount) != HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER))
+    {
+        actualLineCount = max(actualLineCount, 1u);
+    }
+
+    if (actualLineCount == 0)
+    {
+        actualLineCount = 1;
+    }
+
+    DWRITE_LINE_METRICS *lineMetrics =
+        static_cast<DWRITE_LINE_METRICS *>(LocalAlloc(LPTR, sizeof(DWRITE_LINE_METRICS) * actualLineCount));
+    if (!lineMetrics)
+    {
+        Clear();
+        return FALSE;
+    }
+
+    if (FAILED(_pTextLayout->GetLineMetrics(lineMetrics, actualLineCount, &actualLineCount)))
+    {
+        LocalFree(lineMetrics);
+        Clear();
+        return FALSE;
+    }
+
+    _nLineCnt = actualLineCount;
+    _prgLines = static_cast<LINEINFO *>(LocalAlloc(LPTR, _nLineCnt * sizeof(LINEINFO)));
+    if (!_prgLines)
+    {
+        LocalFree(lineMetrics);
+        Clear();
+        return FALSE;
+    }
+
+    UINT32 textPos = 0;
     _nLineHeight = 0;
     _lineHeightDips = 0.0f;
 
-    for (i = 0; i < _nLineCnt; i++)
+    for (UINT i = 0; i < _nLineCnt; i++)
     {
         LINEINFO &line = _prgLines[i];
-        line.pTextLayout = NULL;
         line.prgCharInfo = NULL;
 
-        if (FAILED(_pDWriteFactory->CreateTextLayout(psz + line.nPos, line.nCnt, _pTextFormat, _layoutWidth, 4096.0f,
-                                                     &line.pTextLayout)))
-        {
-            Clear();
-            return FALSE;
-        }
+        const UINT32 lineLength = lineMetrics[i].length;
+        const UINT32 visibleLength = usesPlaceholder ? 0U : (lineLength - lineMetrics[i].newlineLength);
+        line.nPos = textPos;
+        line.nCnt = visibleLength;
 
-        DWRITE_TEXT_METRICS metrics = {};
-        if (FAILED(line.pTextLayout->GetMetrics(&metrics)))
-        {
-            Clear();
-            return FALSE;
-        }
-
-        const FLOAT lineHeightDips = max(metrics.height, 1.0f);
+        const FLOAT lineHeightDips = max(lineMetrics[i].height, 1.0f);
         _lineHeightDips = max(_lineHeightDips, lineHeightDips);
         _nLineHeight = max(_nLineHeight, static_cast<int>(DipsToPixelsY(lineHeightDips)));
 
-        line.prgCharInfo = static_cast<CHARINFO *>(LocalAlloc(LPTR, line.nCnt * sizeof(CHARINFO)));
-        if (!line.prgCharInfo)
+        if (visibleLength > 0)
         {
-            Clear();
-            return FALSE;
-        }
-
-        for (UINT j = 0; j < line.nCnt; j++)
-        {
-            FLOAT hitX = 0.0f;
-            FLOAT hitY = 0.0f;
-            DWRITE_HIT_TEST_METRICS hitMetrics = {};
-            if (FAILED(line.pTextLayout->HitTestTextPosition(j, FALSE, &hitX, &hitY, &hitMetrics)))
+            line.prgCharInfo = static_cast<CHARINFO *>(LocalAlloc(LPTR, visibleLength * sizeof(CHARINFO)));
+            if (!line.prgCharInfo)
             {
+                LocalFree(lineMetrics);
                 Clear();
                 return FALSE;
             }
 
-            D2D1_RECT_F &rc = line.prgCharInfo[j].rc;
-            rc.left = _paddingLeftDips + hitX;
-            rc.top = _paddingTopDips + yOffset + hitY;
-            rc.right = _paddingLeftDips + hitX + hitMetrics.width;
-            rc.bottom = _paddingTopDips + yOffset + hitMetrics.height;
-            if (rc.right <= rc.left)
+            for (UINT32 j = 0; j < visibleLength; j++)
             {
-                rc.right = rc.left + (1.0f * 96.0f / _dpiX);
-            }
-            if (rc.bottom <= rc.top)
-            {
-                rc.bottom = rc.top + lineHeightDips;
+                FLOAT hitX = 0.0f;
+                FLOAT hitY = 0.0f;
+                DWRITE_HIT_TEST_METRICS hitMetrics = {};
+                if (FAILED(_pTextLayout->HitTestTextPosition(textPos + j, FALSE, &hitX, &hitY, &hitMetrics)))
+                {
+                    LocalFree(lineMetrics);
+                    Clear();
+                    return FALSE;
+                }
+
+                D2D1_RECT_F &rc = line.prgCharInfo[j].rc;
+                rc.left = _paddingLeftDips + hitX;
+                rc.top = _paddingTopDips + hitY;
+                rc.right = _paddingLeftDips + hitX + hitMetrics.width;
+                rc.bottom = _paddingTopDips + hitY + hitMetrics.height;
+                if (rc.right <= rc.left)
+                {
+                    rc.right = rc.left + (1.0f * 96.0f / _dpiX);
+                }
+                if (rc.bottom <= rc.top)
+                {
+                    rc.bottom = rc.top + lineHeightDips;
+                }
             }
         }
 
-        yOffset += metrics.height;
+        textPos += lineLength;
     }
+
+    LocalFree(lineMetrics);
 
     if (_nLineHeight == 0)
     {
-        _nLineHeight = 1;
+        _nLineHeight = max(1L, DipsToPixelsY(max(textMetrics.height, 1.0f)));
+    }
+    if (_lineHeightDips == 0.0f)
+    {
+        _lineHeightDips = max(textMetrics.height, 1.0f);
     }
 
     return TRUE;
@@ -293,15 +280,10 @@ BOOL CTextLayout::Render(ID2D1HwndRenderTarget *pRenderTarget, const WCHAR *psz,
         }
     }
 
-    for (UINT i = 0; i < _nLineCnt; i++)
+    if (_pTextLayout && nCnt > 0)
     {
-        const LINEINFO &line = _prgLines[i];
-        if (line.pTextLayout)
-        {
-            const FLOAT top = line.nCnt ? line.prgCharInfo[0].rc.top : (_paddingTopDips + i * _lineHeightDips);
-            pRenderTarget->DrawTextLayout(D2D1::Point2F(_paddingLeftDips, top), line.pTextLayout, pTextBrush,
-                                          D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
-        }
+        pRenderTarget->DrawTextLayout(D2D1::Point2F(_paddingLeftDips, _paddingTopDips), _pTextLayout, pTextBrush,
+                                      D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
     }
 
     for (UINT i = 0; i < _nLineCnt; i++)
@@ -432,8 +414,25 @@ BOOL CTextLayout::RectFromCharPos(UINT nPos, RECT *prc)
 BOOL CTextLayout::RectFromCharPosDips(UINT nPos, D2D1_RECT_F *prc)
 {
     *prc = D2D1::RectF();
+
+    if ((_nLineCnt > 0) && (_prgLines[0].nCnt == 0))
+    {
+        prc->left = _paddingLeftDips;
+        prc->top = _paddingTopDips;
+        prc->right = _paddingLeftDips + PixelsToDipsX(kCaretWidthPixels);
+        prc->bottom = _paddingTopDips + _lineHeightDips;
+        return TRUE;
+    }
+
     for (UINT i = 0; i < _nLineCnt; i++)
     {
+        if ((_prgLines[i].nCnt > 0) && (nPos == _prgLines[i].nPos))
+        {
+            *prc = _prgLines[i].prgCharInfo[0].rc;
+            prc->right = prc->left;
+            return TRUE;
+        }
+
         if (nPos < _prgLines[i].nPos)
             continue;
 
@@ -519,15 +518,16 @@ UINT CTextLayout::FineFirstEndCharPosInLine(UINT uCurPos, BOOL bFirst)
 
 void CTextLayout::Clear()
 {
+    if (_pTextLayout)
+    {
+        _pTextLayout->Release();
+        _pTextLayout = NULL;
+    }
+
     if (_prgLines)
     {
         for (UINT i = 0; i < _nLineCnt; i++)
         {
-            if (_prgLines[i].pTextLayout)
-            {
-                _prgLines[i].pTextLayout->Release();
-            }
-
             if (_prgLines[i].prgCharInfo)
             {
                 LocalFree(_prgLines[i].prgCharInfo);

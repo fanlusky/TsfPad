@@ -38,7 +38,6 @@ typedef struct
     UINT nPos;
     UINT nCnt;
     CHARINFO *prgCharInfo;
-    IDWriteTextLayout *pTextLayout;
 } LINEINFO;
 
 //----------------------------------------------------------------
@@ -54,6 +53,7 @@ class CTextLayout
     {
         _pDWriteFactory = NULL;
         _pTextFormat = NULL;
+        _pTextLayout = NULL;
         _prgLines = NULL;
         _nLineCnt = 0;
         _fInterimCaret = FALSE;
@@ -135,6 +135,7 @@ class CTextLayout
 
     IDWriteFactory *_pDWriteFactory;
     IDWriteTextFormat *_pTextFormat;
+    IDWriteTextLayout *_pTextLayout;
     int _nLineHeight;
     FLOAT _lineHeightDips;
     FLOAT _layoutWidth;
