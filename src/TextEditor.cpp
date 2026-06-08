@@ -22,6 +22,7 @@ void CTextEditor::MoveSelection(UINT nSelStart, UINT nSelEnd)
 
     _nSelStart = nSelStart;
     _nSelEnd = nSelEnd;
+    _layout.ResetCaretBlink();
 
     _pTextStore->OnSelectionChange();
 }
@@ -39,6 +40,7 @@ void CTextEditor::MoveSelectionNext()
         _nSelEnd++;
 
     _nSelStart = _nSelEnd;
+    _layout.ResetCaretBlink();
     _pTextStore->OnSelectionChange();
 }
 
@@ -54,6 +56,7 @@ void CTextEditor::MoveSelectionPrev()
         _nSelStart--;
 
     _nSelEnd = _nSelStart;
+    _layout.ResetCaretBlink();
     _pTextStore->OnSelectionChange();
 }
 
@@ -148,6 +151,8 @@ BOOL CTextEditor::InsertAtSelection(LPCWSTR psz)
 
     _nSelStart += lstrlen(psz);
     _nSelEnd = _nSelStart;
+    _layout.ResetCaretBlink();
+    UpdateLayout();
 
     _pTextStore->OnTextChange(_nSelStart, lOldSelEnd, _nSelEnd);
     _pTextStore->OnSelectionChange();
@@ -174,6 +179,8 @@ BOOL CTextEditor::DeleteAtSelection(BOOL fBack)
         if (!RemoveText(_nSelEnd, 1))
             return FALSE;
 
+        _layout.ResetCaretBlink();
+        UpdateLayout();
         _pTextStore->OnTextChange(_nSelEnd, _nSelEnd + 1, _nSelEnd);
     }
 
@@ -184,6 +191,8 @@ BOOL CTextEditor::DeleteAtSelection(BOOL fBack)
 
         _nSelStart--;
         _nSelEnd = _nSelStart;
+        _layout.ResetCaretBlink();
+        UpdateLayout();
 
         _pTextStore->OnTextChange(_nSelStart, _nSelStart + 1, _nSelStart);
         _pTextStore->OnSelectionChange();
@@ -204,6 +213,8 @@ BOOL CTextEditor::DeleteSelection()
     RemoveText(_nSelStart, _nSelEnd - _nSelStart);
 
     _nSelEnd = _nSelStart;
+    _layout.ResetCaretBlink();
+    UpdateLayout();
 
     _pTextStore->OnTextChange(_nSelStart, nSelOldEnd, _nSelStart);
     _pTextStore->OnSelectionChange();
@@ -217,21 +228,21 @@ BOOL CTextEditor::DeleteSelection()
 //
 //----------------------------------------------------------------
 
-void CTextEditor::Render(HDC hdc, const LOGFONT *plf)
+BOOL CTextEditor::InitializeRenderResources(IDWriteFactory *pDWriteFactory)
 {
-    HFONT hFont = CreateFontIndirect(plf);
+    return _layout.Initialize(pDWriteFactory);
+}
 
-    if (hFont)
+void CTextEditor::SetFont(const LOGFONT *plf)
+{
+    if (!plf)
     {
-        HFONT hFontOrg = (HFONT)SelectObject(hdc, hFont);
-
-        _layout.Layout(hdc, GetTextBuffer(), GetTextLength());
-        _layout.Render(hdc, GetTextBuffer(), GetTextLength(), _nSelStart, _nSelEnd, _pCompositionRenderInfo,
-                       _nCompositionRenderInfo);
-
-        SelectObject(hdc, hFontOrg);
-        DeleteObject(hFont);
+        return;
     }
+
+    _lfCurrentFont = *plf;
+    _fHasFont = TRUE;
+    UpdateLayout();
 }
 
 //----------------------------------------------------------------
@@ -240,26 +251,36 @@ void CTextEditor::Render(HDC hdc, const LOGFONT *plf)
 //
 //----------------------------------------------------------------
 
-void CTextEditor::UpdateLayout(const LOGFONT *plf)
+void CTextEditor::Render(ID2D1HwndRenderTarget *pRenderTarget)
 {
-    HDC hdc = GetDC(_hwnd);
-    if (hdc)
+    if (!_fHasFont)
     {
-        HFONT hFont = CreateFontIndirect(plf);
-        if (hFont)
-        {
-            HFONT hFontOrg = (HFONT)SelectObject(hdc, hFont);
-
-            std::wstring strText(GetTextBuffer(), GetTextLength());
-            OutputDebugString(fmt::format(L"strText:{}", strText).c_str());
-
-            _layout.Layout(hdc, GetTextBuffer(), GetTextLength());
-
-            SelectObject(hdc, hFontOrg);
-            DeleteObject(hFont);
-        }
-        ReleaseDC(_hwnd, hdc);
+        return;
     }
+
+    UpdateLayout();
+    _layout.Render(pRenderTarget, GetTextBuffer(), GetTextLength(), _nSelStart, _nSelEnd, _pCompositionRenderInfo,
+                   _nCompositionRenderInfo);
+}
+
+//----------------------------------------------------------------
+//
+//
+//
+//----------------------------------------------------------------
+
+void CTextEditor::UpdateLayout()
+{
+    if (!_hwnd || !_fHasFont)
+    {
+        return;
+    }
+
+    RECT rcClient = {};
+    GetClientRect(_hwnd, &rcClient);
+    const FLOAT dpi = static_cast<FLOAT>(GetDpiForWindow(_hwnd));
+    _layout.Layout(GetTextBuffer(), GetTextLength(), &_lfCurrentFont, static_cast<FLOAT>(max(rcClient.right, 1L)), dpi,
+                   dpi);
 }
 
 //----------------------------------------------------------------

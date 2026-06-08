@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Windows.h>
+#include <d2d1.h>
+#include <dwrite.h>
 #include <msctf.h>
 
 typedef struct
@@ -18,8 +20,8 @@ typedef struct
 
 struct CHARINFO
 {
-    RECT rc;
-    int GetWidth()
+    D2D1_RECT_F rc;
+    FLOAT GetWidth()
     {
         return rc.right - rc.left;
     }
@@ -36,6 +38,7 @@ typedef struct
     UINT nPos;
     UINT nCnt;
     CHARINFO *prgCharInfo;
+    IDWriteTextLayout *pTextLayout;
 } LINEINFO;
 
 //----------------------------------------------------------------
@@ -49,25 +52,43 @@ class CTextLayout
   public:
     CTextLayout()
     {
+        _pDWriteFactory = NULL;
+        _pTextFormat = NULL;
         _prgLines = NULL;
         _nLineCnt = 0;
-        _fCaret = FALSE;
         _fInterimCaret = FALSE;
+        _fCaretVisible = TRUE;
+        _layoutWidth = 0.0f;
+        _nLineHeight = 0;
+        _lineHeightDips = 0.0f;
+        _dpiX = 96.0f;
+        _dpiY = 96.0f;
+        _rcCaret = D2D1::RectF();
     }
 
     ~CTextLayout()
     {
         Clear();
+        if (_pTextFormat)
+        {
+            _pTextFormat->Release();
+        }
+        if (_pDWriteFactory)
+        {
+            _pDWriteFactory->Release();
+        }
     }
 
-    BOOL Layout(HDC hdc, const WCHAR *psz, UINT nCnt);
-    BOOL Render(HDC hdc, const WCHAR *psz, UINT nCnt, UINT nSelStart, UINT nSelEnd,
+    BOOL Initialize(IDWriteFactory *pDWriteFactory);
+    BOOL Layout(const WCHAR *psz, UINT nCnt, const LOGFONT *plf, FLOAT layoutWidthPixels, FLOAT dpiX, FLOAT dpiY);
+    BOOL Render(ID2D1HwndRenderTarget *pRenderTarget, const WCHAR *psz, UINT nCnt, UINT nSelStart, UINT nSelEnd,
                 const COMPOSITIONRENDERINFO *pCompositionRenderInfo, UINT nCompositionRenderInfo);
     BOOL RectFromCharPos(UINT nPos, RECT *prc);
     UINT CharPosFromPoint(POINT pt);
     UINT ExactCharPosFromPoint(POINT pt);
     UINT FineFirstEndCharPosInLine(UINT uCurPos, BOOL bFirst);
-    void BlinkCaret(HDC hdc);
+    void ToggleCaretBlink();
+    void ResetCaretBlink();
     void SetInterimCaret(BOOL fSet, UINT uPos);
     BOOL IsInterimCaret()
     {
@@ -80,15 +101,30 @@ class CTextLayout
     }
 
   private:
-    HPEN CreateUnderlinePen(const TF_DISPLAYATTRIBUTE *pda, int nWidth);
+    BOOL EnsureTextFormat(const LOGFONT *plf, FLOAT dpiY);
+    BOOL RectFromCharPosDips(UINT nPos, D2D1_RECT_F *prc);
+    FLOAT PixelsToDipsX(FLOAT value) const;
+    FLOAT PixelsToDipsY(FLOAT value) const;
+    LONG DipsToPixelsX(FLOAT value) const;
+    LONG DipsToPixelsY(FLOAT value) const;
+    void DrawUnderline(ID2D1HwndRenderTarget *pRenderTarget, const TF_DISPLAYATTRIBUTE *pda, const D2D1_RECT_F &rc,
+                       BOOL bClause);
+    D2D1_COLOR_F GetAttributeColor(const TF_DA_COLOR *pdac, COLORREF fallbackColor);
+    D2D1_COLOR_F ToColorF(COLORREF color);
     void Clear();
 
+    IDWriteFactory *_pDWriteFactory;
+    IDWriteTextFormat *_pTextFormat;
     int _nLineHeight;
+    FLOAT _lineHeightDips;
+    FLOAT _layoutWidth;
+    FLOAT _dpiX;
+    FLOAT _dpiY;
 
     LINEINFO *_prgLines;
     UINT _nLineCnt;
 
-    BOOL _fCaret;
     BOOL _fInterimCaret;
-    RECT _rcCaret;
+    BOOL _fCaretVisible;
+    D2D1_RECT_F _rcCaret;
 };

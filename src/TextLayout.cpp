@@ -1,39 +1,88 @@
 #include "TextLayout.h"
 
-//+---------------------------------------------------------------------------
-//
-//  GetAttributeColor
-//
-//----------------------------------------------------------------------------
+#include <cmath>
 
-COLORREF GetAttributeColor(const TF_DA_COLOR *pdac)
+namespace
 {
-    switch (pdac->type)
+float DipsFromLogFontHeight(const LOGFONT *plf, FLOAT dpiY)
+{
+    LONG logicalHeight = plf ? plf->lfHeight : 0;
+    if (logicalHeight == 0)
     {
-    case TF_CT_SYSCOLOR:
-        return GetSysColor(pdac->nIndex);
-        break;
-
-    case TF_CT_COLORREF:
-        return pdac->cr;
-        break;
-    case TF_CT_NONE:
-        break;
+        return 16.0f;
     }
-    return GetSysColor(COLOR_WINDOWTEXT);
+
+    const FLOAT pixels = static_cast<FLOAT>(abs(logicalHeight));
+    return pixels * 96.0f / max(dpiY, 1.0f);
+}
+} // namespace
+
+BOOL CTextLayout::Initialize(IDWriteFactory *pDWriteFactory)
+{
+    if (_pDWriteFactory == pDWriteFactory)
+    {
+        return TRUE;
+    }
+
+    if (_pDWriteFactory)
+    {
+        _pDWriteFactory->Release();
+        _pDWriteFactory = NULL;
+    }
+
+    if (!pDWriteFactory)
+    {
+        return FALSE;
+    }
+
+    _pDWriteFactory = pDWriteFactory;
+    _pDWriteFactory->AddRef();
+    return TRUE;
 }
 
-//----------------------------------------------------------------
-//
-//
-//
-//----------------------------------------------------------------
+BOOL CTextLayout::EnsureTextFormat(const LOGFONT *plf, FLOAT dpiY)
+{
+    if (!_pDWriteFactory || !plf)
+    {
+        return FALSE;
+    }
 
-BOOL CTextLayout::Layout(HDC hdc, const WCHAR *psz, UINT nCnt)
+    if (_pTextFormat)
+    {
+        _pTextFormat->Release();
+        _pTextFormat = NULL;
+    }
+
+    const DWRITE_FONT_WEIGHT fontWeight = plf->lfWeight >= FW_BOLD ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL;
+    const DWRITE_FONT_STYLE fontStyle = plf->lfItalic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL;
+    const DWRITE_FONT_STRETCH fontStretch = DWRITE_FONT_STRETCH_NORMAL;
+    const FLOAT fontSize = DipsFromLogFontHeight(plf, dpiY);
+
+    if (FAILED(_pDWriteFactory->CreateTextFormat(plf->lfFaceName, NULL, fontWeight, fontStyle, fontStretch, fontSize,
+                                                 L"", &_pTextFormat)))
+    {
+        return FALSE;
+    }
+
+    _pTextFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    _pTextFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    _pTextFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    return TRUE;
+}
+
+BOOL CTextLayout::Layout(const WCHAR *psz, UINT nCnt, const LOGFONT *plf, FLOAT layoutWidthPixels, FLOAT dpiX, FLOAT dpiY)
 {
     Clear();
 
-    // Count Line
+    if (!EnsureTextFormat(plf, dpiY))
+    {
+        return FALSE;
+    }
+
+    _dpiX = max(dpiX, 1.0f);
+    _dpiY = max(dpiY, 1.0f);
+    _layoutWidth = max(PixelsToDipsX(layoutWidthPixels), 1.0f);
+
     UINT i = 0;
     BOOL bNewLine = TRUE;
     _nLineCnt = 0;
@@ -47,17 +96,41 @@ BOOL CTextLayout::Layout(HDC hdc, const WCHAR *psz, UINT nCnt)
             break;
         default:
             if (bNewLine)
+            {
                 _nLineCnt++;
+            }
             bNewLine = FALSE;
             break;
         }
     }
 
-    _prgLines = (LINEINFO *)LocalAlloc(LPTR, _nLineCnt * sizeof(LINEINFO));
-    if (!_prgLines)
-        return FALSE;
+    if (_nLineCnt == 0)
+    {
+        IDWriteTextLayout *pEmptyLayout = NULL;
+        if (FAILED(_pDWriteFactory->CreateTextLayout(L" ", 1, _pTextFormat, _layoutWidth, 4096.0f, &pEmptyLayout)))
+        {
+            return FALSE;
+        }
 
-    // Count character of each line.
+        DWRITE_TEXT_METRICS metrics = {};
+        const HRESULT hrMetrics = pEmptyLayout->GetMetrics(&metrics);
+        pEmptyLayout->Release();
+        if (FAILED(hrMetrics))
+        {
+            return FALSE;
+        }
+
+        _lineHeightDips = max(metrics.height, 1.0f);
+        _nLineHeight = max(1L, DipsToPixelsY(_lineHeightDips));
+        return TRUE;
+    }
+
+    _prgLines = static_cast<LINEINFO *>(LocalAlloc(LPTR, _nLineCnt * sizeof(LINEINFO)));
+    if (!_prgLines)
+    {
+        return FALSE;
+    }
+
     bNewLine = TRUE;
     int nCurrentLine = -1;
     for (i = 0; i < nCnt; i++)
@@ -84,240 +157,273 @@ BOOL CTextLayout::Layout(HDC hdc, const WCHAR *psz, UINT nCnt)
         }
     }
 
-    TEXTMETRIC tm;
-    GetTextMetrics(hdc, &tm);
-    _nLineHeight = tm.tmHeight + tm.tmExternalLeading;
+    FLOAT yOffset = 0.0f;
+    _nLineHeight = 0;
+    _lineHeightDips = 0.0f;
 
-    POINT ptCurrent;
-    ptCurrent.x = 0;
-    ptCurrent.y = 0;
-
-    // Get the rectangle of each characters.
     for (i = 0; i < _nLineCnt; i++)
     {
-        _prgLines[i].prgCharInfo = NULL;
+        LINEINFO &line = _prgLines[i];
+        line.pTextLayout = NULL;
+        line.prgCharInfo = NULL;
 
-        if (_prgLines[i].nCnt)
+        if (FAILED(_pDWriteFactory->CreateTextLayout(psz + line.nPos, line.nCnt, _pTextFormat, _layoutWidth, 4096.0f,
+                                                     &line.pTextLayout)))
         {
-            _prgLines[i].prgCharInfo = (CHARINFO *)LocalAlloc(LPTR, _prgLines[i].nCnt * sizeof(CHARINFO));
-            if (!_prgLines[i].prgCharInfo)
-                return FALSE;
+            Clear();
+            return FALSE;
+        }
 
-            UINT j;
-            POINT ptPrev = ptCurrent;
-            for (j = 0; j < _prgLines[i].nCnt; j++)
+        DWRITE_TEXT_METRICS metrics = {};
+        if (FAILED(line.pTextLayout->GetMetrics(&metrics)))
+        {
+            Clear();
+            return FALSE;
+        }
+
+        const FLOAT lineHeightDips = max(metrics.height, 1.0f);
+        _lineHeightDips = max(_lineHeightDips, lineHeightDips);
+        _nLineHeight = max(_nLineHeight, static_cast<int>(DipsToPixelsY(lineHeightDips)));
+
+        line.prgCharInfo = static_cast<CHARINFO *>(LocalAlloc(LPTR, line.nCnt * sizeof(CHARINFO)));
+        if (!line.prgCharInfo)
+        {
+            Clear();
+            return FALSE;
+        }
+
+        for (UINT j = 0; j < line.nCnt; j++)
+        {
+            FLOAT hitX = 0.0f;
+            FLOAT hitY = 0.0f;
+            DWRITE_HIT_TEST_METRICS hitMetrics = {};
+            if (FAILED(line.pTextLayout->HitTestTextPosition(j, FALSE, &hitX, &hitY, &hitMetrics)))
             {
-                SIZE size;
-                GetTextExtentPoint32(hdc, psz + _prgLines[i].nPos, j + 1, &size);
-                ptCurrent.x = size.cx;
-                _prgLines[i].prgCharInfo[j].rc.left = ptPrev.x;
-                _prgLines[i].prgCharInfo[j].rc.top = ptPrev.y;
-                _prgLines[i].prgCharInfo[j].rc.right = ptCurrent.x;
-                _prgLines[i].prgCharInfo[j].rc.bottom = ptPrev.y + _nLineHeight;
+                Clear();
+                return FALSE;
+            }
 
-                ptPrev = ptCurrent;
+            D2D1_RECT_F &rc = line.prgCharInfo[j].rc;
+            rc.left = hitX;
+            rc.top = yOffset + hitY;
+            rc.right = hitX + hitMetrics.width;
+            rc.bottom = yOffset + hitMetrics.height;
+            if (rc.right <= rc.left)
+            {
+                rc.right = rc.left + (1.0f * 96.0f / _dpiX);
+            }
+            if (rc.bottom <= rc.top)
+            {
+                rc.bottom = rc.top + lineHeightDips;
             }
         }
 
-        ptCurrent.x = 0;
-        ptCurrent.y += _nLineHeight;
+        yOffset += metrics.height;
     }
+
+    if (_nLineHeight == 0)
+    {
+        _nLineHeight = 1;
+    }
+
     return TRUE;
 }
 
-//----------------------------------------------------------------
-//
-//
-//
-//----------------------------------------------------------------
-
-BOOL CTextLayout::Render(HDC hdc, const WCHAR *psz, UINT nCnt, UINT nSelStart, UINT nSelEnd,
+BOOL CTextLayout::Render(ID2D1HwndRenderTarget *pRenderTarget, const WCHAR *psz, UINT nCnt, UINT nSelStart, UINT nSelEnd,
                          const COMPOSITIONRENDERINFO *pCompositionRenderInfo, UINT nCompositionRenderInfo)
 {
-    POINT ptCurrent;
-    ptCurrent.x = 0;
-    ptCurrent.y = 0;
+    if (!pRenderTarget || !_pTextFormat)
+    {
+        return FALSE;
+    }
 
-    SetBkMode(hdc, OPAQUE);
-    SetTextColor(hdc, GetSysColor(COLOR_WINDOWTEXT));
-    SetBkColor(hdc, GetSysColor(COLOR_WINDOW));
+    ID2D1SolidColorBrush *pTextBrush = NULL;
+    ID2D1SolidColorBrush *pSelectionBrush = NULL;
+    ID2D1SolidColorBrush *pCaretBrush = NULL;
+    ID2D1SolidColorBrush *pCompositionBrush = NULL;
 
-    // Render lines
+    const D2D1_COLOR_F textColor = ToColorF(GetSysColor(COLOR_WINDOWTEXT));
+    const D2D1_COLOR_F selectionColor = ToColorF(GetSysColor(COLOR_HIGHLIGHT));
+
+    if (FAILED(pRenderTarget->CreateSolidColorBrush(textColor, &pTextBrush)) ||
+        FAILED(pRenderTarget->CreateSolidColorBrush(selectionColor, &pSelectionBrush)) ||
+        FAILED(pRenderTarget->CreateSolidColorBrush(textColor, &pCaretBrush)) ||
+        FAILED(pRenderTarget->CreateSolidColorBrush(textColor, &pCompositionBrush)))
+    {
+        if (pTextBrush)
+            pTextBrush->Release();
+        if (pSelectionBrush)
+            pSelectionBrush->Release();
+        if (pCaretBrush)
+            pCaretBrush->Release();
+        if (pCompositionBrush)
+            pCompositionBrush->Release();
+        return FALSE;
+    }
+
     for (UINT i = 0; i < _nLineCnt; i++)
     {
-        if (_prgLines[i].nCnt)
+        const LINEINFO &line = _prgLines[i];
+        if ((nSelEnd >= line.nPos) && (nSelStart <= line.nPos + line.nCnt))
         {
-            TextOut(hdc, ptCurrent.x, ptCurrent.y, psz + _prgLines[i].nPos, _prgLines[i].nCnt);
-        }
-        ptCurrent.x = 0;
-        ptCurrent.y += _nLineHeight;
-    }
+            UINT nSelStartInLine = 0;
+            UINT nSelEndInLine = line.nCnt;
 
-    _fCaret = FALSE;
+            if (nSelStart > line.nPos)
+                nSelStartInLine = nSelStart - line.nPos;
 
-    // Render selection/caret
-    RECT rcSel;
-    if (_nLineCnt)
-    {
-        for (UINT i = 0; i < _nLineCnt; i++)
-        {
-            if ((nSelEnd >= _prgLines[i].nPos) && (nSelStart <= _prgLines[i].nPos + _prgLines[i].nCnt))
+            if (nSelEnd < line.nPos + line.nCnt)
+                nSelEndInLine = nSelEnd - line.nPos;
+
+            if (nSelStartInLine != nSelEndInLine)
             {
-                UINT nSelStartInLine = 0;
-                UINT nSelEndInLine = _prgLines[i].nCnt;
-
-                if (nSelStart > _prgLines[i].nPos)
-                    nSelStartInLine = nSelStart - _prgLines[i].nPos;
-
-                if (nSelEnd < _prgLines[i].nPos + _prgLines[i].nCnt)
-                    nSelEndInLine = nSelEnd - _prgLines[i].nPos;
-
-                if (nSelStartInLine != nSelEndInLine)
+                for (UINT j = nSelStartInLine; j < nSelEndInLine; j++)
                 {
-                    for (UINT j = nSelStartInLine; j < nSelEndInLine; j++)
-                    {
-                        InvertRect(hdc, &_prgLines[i].prgCharInfo[j].rc);
-                    }
-                }
-                else
-                {
-                    if (nSelStartInLine == _prgLines[i].nCnt)
-                    {
-                        rcSel = _prgLines[i].prgCharInfo[nSelStartInLine - 1].rc;
-                        rcSel.left = rcSel.right;
-                        rcSel.right++;
-                    }
-                    else
-                    {
-                        rcSel = _prgLines[i].prgCharInfo[nSelStartInLine].rc;
-                        rcSel.right = rcSel.left + 1;
-                    }
-                    InvertRect(hdc, &rcSel);
-                    _fCaret = TRUE;
-                    _rcCaret = rcSel;
+                    const D2D1_RECT_F &rc = line.prgCharInfo[j].rc;
+                    pRenderTarget->FillRectangle(D2D1::RectF(rc.left, rc.top, rc.right, rc.bottom), pSelectionBrush);
                 }
             }
+        }
+    }
 
-            for (UINT j = 0; j < nCompositionRenderInfo; j++)
+    for (UINT i = 0; i < _nLineCnt; i++)
+    {
+        const LINEINFO &line = _prgLines[i];
+        if (line.pTextLayout)
+        {
+            const FLOAT top = line.nCnt ? line.prgCharInfo[0].rc.top : (i * _lineHeightDips);
+            pRenderTarget->DrawTextLayout(D2D1::Point2F(0.0f, top), line.pTextLayout, pTextBrush,
+                                          D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+        }
+    }
+
+    for (UINT i = 0; i < _nLineCnt; i++)
+    {
+        const LINEINFO &line = _prgLines[i];
+        for (UINT j = 0; j < nCompositionRenderInfo; j++)
+        {
+            const COMPOSITIONRENDERINFO &composition = pCompositionRenderInfo[j];
+            if ((composition.nEnd >= line.nPos) && (composition.nStart <= line.nPos + line.nCnt))
             {
+                UINT nCompStartInLine = 0;
+                UINT nCompEndInLine = line.nCnt;
 
-                if ((pCompositionRenderInfo[j].nEnd >= _prgLines[i].nPos) &&
-                    (pCompositionRenderInfo[j].nStart <= _prgLines[i].nPos + _prgLines[i].nCnt))
+                if (composition.nStart > line.nPos)
+                    nCompStartInLine = composition.nStart - line.nPos;
+
+                if (composition.nEnd < line.nPos + line.nCnt)
+                    nCompEndInLine = composition.nEnd - line.nPos;
+
+                for (UINT k = nCompStartInLine; k < nCompEndInLine; k++)
                 {
-                    UINT nCompStartInLine = 0;
-                    UINT nCompEndInLine = _prgLines[i].nCnt;
-                    int nBaseLineWidth = (_nLineHeight / 18) + 1;
+                    const D2D1_RECT_F &rc = line.prgCharInfo[k].rc;
+                    const BOOL bClause = (k + 1 == nCompEndInLine);
 
-                    if (pCompositionRenderInfo[j].nStart > _prgLines[i].nPos)
-                        nCompStartInLine = pCompositionRenderInfo[j].nStart - _prgLines[i].nPos;
-
-                    if (pCompositionRenderInfo[j].nEnd < _prgLines[i].nPos + _prgLines[i].nCnt)
-                        nCompEndInLine = pCompositionRenderInfo[j].nEnd - _prgLines[i].nPos;
-
-                    for (UINT k = nCompStartInLine; k < nCompEndInLine; k++)
+                    if (composition.da.crBk.type != TF_CT_NONE)
                     {
-                        UINT uCurrentCompPos = _prgLines[i].nPos + k - pCompositionRenderInfo[j].nStart;
-                        BOOL bClause = FALSE;
+                        pCompositionBrush->SetColor(GetAttributeColor(&composition.da.crBk, GetSysColor(COLOR_WINDOW)));
+                        pRenderTarget->FillRectangle(D2D1::RectF(rc.left, rc.top, rc.right, rc.bottom), pCompositionBrush);
+                    }
 
-                        if (k + 1 == nCompEndInLine)
-                        {
-                            bClause = TRUE;
-                        }
+                    WCHAR ch = psz[line.nPos + k];
+                    D2D1_COLOR_F compositionTextColor = GetAttributeColor(&composition.da.crText, GetSysColor(COLOR_WINDOWTEXT));
+                    if (composition.da.crText.type == TF_CT_NONE)
+                    {
+                        compositionTextColor = textColor;
+                    }
 
-                        if ((pCompositionRenderInfo[j].da.crText.type != TF_CT_NONE) &&
-                            (pCompositionRenderInfo[j].da.crBk.type != TF_CT_NONE))
-                        {
-                            SetBkMode(hdc, OPAQUE);
-                            SetTextColor(hdc, GetAttributeColor(&pCompositionRenderInfo[j].da.crText));
-                            SetBkColor(hdc, GetAttributeColor(&pCompositionRenderInfo[j].da.crBk));
+                    pCompositionBrush->SetColor(compositionTextColor);
+                    pRenderTarget->DrawTextW(&ch, 1, _pTextFormat,
+                                             D2D1::RectF(rc.left, rc.top, rc.right + PixelsToDipsX(2.0f), rc.bottom),
+                                             pCompositionBrush, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
+                                             DWRITE_MEASURING_MODE_NATURAL);
 
-                            RECT rc = _prgLines[i].prgCharInfo[k].rc;
-                            ExtTextOut(hdc, rc.left, rc.top, ETO_OPAQUE, &rc, psz + _prgLines[i].nPos + k, 1, NULL);
-                        }
-
-                        if (pCompositionRenderInfo[j].da.lsStyle != TF_LS_NONE)
-                        {
-                            HPEN hpen = CreateUnderlinePen(&pCompositionRenderInfo[j].da, nBaseLineWidth);
-                            if (hpen)
-                            {
-                                HPEN hpenOrg;
-                                hpenOrg = (HPEN)SelectObject(hdc, hpen);
-                                RECT rc = _prgLines[i].prgCharInfo[k].rc;
-
-                                POINT pts[2];
-                                pts[0].x = rc.left;
-                                pts[0].y = rc.bottom;
-                                pts[1].x = rc.right - (bClause ? nBaseLineWidth : 0);
-                                pts[1].y = rc.bottom;
-                                Polyline(hdc, pts, 2);
-
-                                SelectObject(hdc, hpenOrg);
-                            }
-                        }
+                    if (composition.da.lsStyle != TF_LS_NONE)
+                    {
+                        DrawUnderline(pRenderTarget, &composition.da, rc, bClause);
                     }
                 }
             }
         }
     }
-    else
+
+    if (_nLineCnt == 0)
     {
-        rcSel.left = 0;
-        rcSel.top = 0;
-        rcSel.right = 1;
-        rcSel.bottom = _nLineHeight;
-        InvertRect(hdc, &rcSel);
-        _fCaret = TRUE;
-        _rcCaret = rcSel;
+        _rcCaret.left = 0.0f;
+        _rcCaret.top = 0.0f;
+        _rcCaret.right = PixelsToDipsX(1.0f);
+        _rcCaret.bottom = _lineHeightDips;
+    }
+    else if (nSelStart == nSelEnd)
+    {
+        RectFromCharPosDips(nSelStart, &_rcCaret);
     }
 
+    if ((nSelStart == nSelEnd) && (_fInterimCaret || _fCaretVisible))
+    {
+        pRenderTarget->FillRectangle(
+            D2D1::RectF(_rcCaret.left, _rcCaret.top, max(_rcCaret.right, _rcCaret.left + PixelsToDipsX(1.0f)),
+                         _rcCaret.bottom),
+            pCaretBrush);
+    }
+
+    pCompositionBrush->Release();
+    pCaretBrush->Release();
+    pSelectionBrush->Release();
+    pTextBrush->Release();
     return TRUE;
 }
 
-//----------------------------------------------------------------
-//
-//
-//
-//----------------------------------------------------------------
-
-void CTextLayout::BlinkCaret(HDC hdc)
+void CTextLayout::ToggleCaretBlink()
 {
-    if (_fInterimCaret || _fCaret)
-        InvertRect(hdc, &_rcCaret);
-
-    return;
+    _fCaretVisible = !_fCaretVisible;
 }
 
-//----------------------------------------------------------------
-//
-//
-//
-//----------------------------------------------------------------
+void CTextLayout::ResetCaretBlink()
+{
+    _fCaretVisible = TRUE;
+}
 
 void CTextLayout::SetInterimCaret(BOOL fSet, UINT nPos)
 {
     _fInterimCaret = fSet;
     if (_fInterimCaret)
     {
-        RectFromCharPos(nPos, &_rcCaret);
+        RectFromCharPosDips(nPos, &_rcCaret);
     }
     else
     {
-        _rcCaret.left = 0;
-        _rcCaret.top = 0;
-        _rcCaret.right = 0;
-        _rcCaret.bottom = 0;
+        _rcCaret = D2D1::RectF();
     }
 }
 
-//----------------------------------------------------------------
-//
-//
-//
-//----------------------------------------------------------------
-
 BOOL CTextLayout::RectFromCharPos(UINT nPos, RECT *prc)
 {
-    memset(prc, 0, sizeof(*prc));
+    D2D1_RECT_F rc = {};
+    if (!RectFromCharPosDips(nPos, &rc))
+    {
+        memset(prc, 0, sizeof(*prc));
+        return FALSE;
+    }
+
+    prc->left = DipsToPixelsX(rc.left);
+    prc->top = DipsToPixelsY(rc.top);
+    prc->right = DipsToPixelsX(rc.right);
+    prc->bottom = DipsToPixelsY(rc.bottom);
+    if (prc->right <= prc->left)
+    {
+        prc->right = prc->left + 1;
+    }
+    if (prc->bottom <= prc->top)
+    {
+        prc->bottom = prc->top + max(_nLineHeight, 1);
+    }
+    return TRUE;
+}
+
+BOOL CTextLayout::RectFromCharPosDips(UINT nPos, D2D1_RECT_F *prc)
+{
+    *prc = D2D1::RectF();
     for (UINT i = 0; i < _nLineCnt; i++)
     {
         if (nPos < _prgLines[i].nPos)
@@ -338,27 +444,24 @@ BOOL CTextLayout::RectFromCharPos(UINT nPos, RECT *prc)
         return TRUE;
     }
 
-    prc->top = _nLineCnt * _nLineHeight;
-    prc->bottom = prc->top + _nLineHeight;
+    prc->top = _nLineCnt * _lineHeightDips;
+    prc->bottom = prc->top + _lineHeightDips;
     return TRUE;
 }
 
-//----------------------------------------------------------------
-//
-//
-//
-//----------------------------------------------------------------
-
 UINT CTextLayout::CharPosFromPoint(POINT pt)
 {
+    const FLOAT dipX = PixelsToDipsX(static_cast<FLOAT>(pt.x));
+    const FLOAT dipY = PixelsToDipsY(static_cast<FLOAT>(pt.y));
     for (UINT i = 0; i < _nLineCnt; i++)
     {
         for (UINT j = 0; j < _prgLines[i].nCnt; j++)
         {
-            if (PtInRect(&_prgLines[i].prgCharInfo[j].rc, pt))
+            const D2D1_RECT_F &rc = _prgLines[i].prgCharInfo[j].rc;
+            if ((dipX >= rc.left) && (dipX < rc.right) && (dipY >= rc.top) && (dipY < rc.bottom))
             {
-                int nWidth = _prgLines[i].prgCharInfo[j].GetWidth();
-                if (pt.x > _prgLines[i].prgCharInfo[j].rc.left + (nWidth * 3 / 4))
+                const FLOAT nWidth = _prgLines[i].prgCharInfo[j].GetWidth();
+                if (dipX > rc.left + (nWidth * 3.0f / 4.0f))
                 {
                     return _prgLines[i].nPos + j + 1;
                 }
@@ -366,35 +469,26 @@ UINT CTextLayout::CharPosFromPoint(POINT pt)
             }
         }
     }
-    return (UINT)(-1);
+    return static_cast<UINT>(-1);
 }
-
-//----------------------------------------------------------------
-//
-//
-//
-//----------------------------------------------------------------
 
 UINT CTextLayout::ExactCharPosFromPoint(POINT pt)
 {
+    const FLOAT dipX = PixelsToDipsX(static_cast<FLOAT>(pt.x));
+    const FLOAT dipY = PixelsToDipsY(static_cast<FLOAT>(pt.y));
     for (UINT i = 0; i < _nLineCnt; i++)
     {
         for (UINT j = 0; j < _prgLines[i].nCnt; j++)
         {
-            if (PtInRect(&_prgLines[i].prgCharInfo[j].rc, pt))
+            const D2D1_RECT_F &rc = _prgLines[i].prgCharInfo[j].rc;
+            if ((dipX >= rc.left) && (dipX < rc.right) && (dipY >= rc.top) && (dipY < rc.bottom))
             {
                 return _prgLines[i].nPos + j;
             }
         }
     }
-    return (UINT)(-1);
+    return static_cast<UINT>(-1);
 }
-
-//----------------------------------------------------------------
-//
-//
-//
-//----------------------------------------------------------------
 
 UINT CTextLayout::FineFirstEndCharPosInLine(UINT uCurPos, BOOL bFirst)
 {
@@ -406,20 +500,12 @@ UINT CTextLayout::FineFirstEndCharPosInLine(UINT uCurPos, BOOL bFirst)
             {
                 return _prgLines[i].nPos;
             }
-            else
-            {
-                return _prgLines[i].nPos + _prgLines[i].nCnt;
-            }
+
+            return _prgLines[i].nPos + _prgLines[i].nCnt;
         }
     }
-    return (UINT)(-1);
+    return static_cast<UINT>(-1);
 }
-
-//----------------------------------------------------------------
-//
-//
-//
-//----------------------------------------------------------------
 
 void CTextLayout::Clear()
 {
@@ -427,57 +513,121 @@ void CTextLayout::Clear()
     {
         for (UINT i = 0; i < _nLineCnt; i++)
         {
+            if (_prgLines[i].pTextLayout)
+            {
+                _prgLines[i].pTextLayout->Release();
+            }
+
             if (_prgLines[i].prgCharInfo)
             {
                 LocalFree(_prgLines[i].prgCharInfo);
             }
         }
         LocalFree(_prgLines);
+        _prgLines = NULL;
     }
     _nLineCnt = 0;
 }
 
-//----------------------------------------------------------------
-//
-//
-//
-//----------------------------------------------------------------
-
-HPEN CTextLayout::CreateUnderlinePen(const TF_DISPLAYATTRIBUTE *pda, int nWidth)
+FLOAT CTextLayout::PixelsToDipsX(FLOAT value) const
 {
-    const DWORD s_dwDotStyles[] = {1, 2};
-    const DWORD s_dwDashStyles[] = {3, 2};
+    return value * 96.0f / max(_dpiX, 1.0f);
+}
 
-    DWORD dwPenStyle = PS_GEOMETRIC | PS_SOLID;
-    DWORD dwStyles = 0;
-    const DWORD *lpdwStyles = NULL;
+FLOAT CTextLayout::PixelsToDipsY(FLOAT value) const
+{
+    return value * 96.0f / max(_dpiY, 1.0f);
+}
 
+LONG CTextLayout::DipsToPixelsX(FLOAT value) const
+{
+    return static_cast<LONG>(std::lround(value * _dpiX / 96.0f));
+}
+
+LONG CTextLayout::DipsToPixelsY(FLOAT value) const
+{
+    return static_cast<LONG>(std::lround(value * _dpiY / 96.0f));
+}
+
+void CTextLayout::DrawUnderline(ID2D1HwndRenderTarget *pRenderTarget, const TF_DISPLAYATTRIBUTE *pda,
+                                const D2D1_RECT_F &rc, BOOL bClause)
+{
+    ID2D1SolidColorBrush *pBrush = NULL;
+    const D2D1_COLOR_F lineColor = GetAttributeColor(&pda->crLine, GetSysColor(COLOR_WINDOWTEXT));
+    if (FAILED(pRenderTarget->CreateSolidColorBrush(lineColor, &pBrush)))
+    {
+        return;
+    }
+
+    FLOAT strokeWidth = (_lineHeightDips / 18.0f) + PixelsToDipsX(1.0f);
     if (pda->fBoldLine)
-        nWidth *= 2;
+    {
+        strokeWidth *= 2.0f;
+    }
+
+    const FLOAT left = static_cast<FLOAT>(rc.left);
+    const FLOAT right = static_cast<FLOAT>(rc.right - (bClause ? strokeWidth : 0.0f));
+    const FLOAT baseline = static_cast<FLOAT>(rc.bottom) - (strokeWidth / 2.0f);
 
     switch (pda->lsStyle)
     {
-    case TF_LS_NONE:
-        return NULL;
-
-    case TF_LS_SOLID:
-        dwPenStyle = PS_GEOMETRIC | PS_SOLID | PS_ENDCAP_FLAT;
-        break;
-
     case TF_LS_DOT:
     case TF_LS_DASH:
     case TF_LS_SQUIGGLE:
-        dwPenStyle = PS_GEOMETRIC | PS_USERSTYLE | PS_ENDCAP_FLAT;
-        dwStyles = 2;
-        lpdwStyles = s_dwDotStyles;
+    {
+        const FLOAT segment = max(strokeWidth * 1.5f, 2.0f);
+        const FLOAT gap = pda->lsStyle == TF_LS_DASH ? strokeWidth * 2.0f : strokeWidth;
+        FLOAT x = left;
+        FLOAT yOffset = 0.0f;
+        while (x < right)
+        {
+            const FLOAT endX = min(x + segment, right);
+            if (pda->lsStyle == TF_LS_SQUIGGLE)
+            {
+                const FLOAT waveHeight = strokeWidth;
+                pRenderTarget->DrawLine(D2D1::Point2F(x, baseline + yOffset), D2D1::Point2F(endX, baseline - yOffset),
+                                        pBrush, strokeWidth);
+                yOffset = waveHeight - yOffset;
+            }
+            else
+            {
+                pRenderTarget->DrawLine(D2D1::Point2F(x, baseline), D2D1::Point2F(endX, baseline), pBrush, strokeWidth);
+            }
+            x = endX + gap;
+        }
+        break;
+    }
+    case TF_LS_SOLID:
+        pRenderTarget->DrawLine(D2D1::Point2F(left, baseline), D2D1::Point2F(right, baseline), pBrush, strokeWidth);
+        break;
+    case TF_LS_NONE:
+    default:
         break;
     }
 
-    LOGBRUSH lbr;
-    lbr.lbStyle = BS_SOLID;
-    lbr.lbColor = 0;
-    lbr.lbHatch = 0;
-    lbr.lbColor = GetAttributeColor(&pda->crLine);
+    pBrush->Release();
+}
 
-    return ExtCreatePen(dwPenStyle, nWidth, &lbr, dwStyles, lpdwStyles);
+D2D1_COLOR_F CTextLayout::GetAttributeColor(const TF_DA_COLOR *pdac, COLORREF fallbackColor)
+{
+    if (!pdac)
+    {
+        return ToColorF(fallbackColor);
+    }
+
+    switch (pdac->type)
+    {
+    case TF_CT_SYSCOLOR:
+        return ToColorF(GetSysColor(pdac->nIndex));
+    case TF_CT_COLORREF:
+        return ToColorF(pdac->cr);
+    case TF_CT_NONE:
+    default:
+        return ToColorF(fallbackColor);
+    }
+}
+
+D2D1_COLOR_F CTextLayout::ToColorF(COLORREF color)
+{
+    return D2D1::ColorF(GetRValue(color) / 255.0f, GetGValue(color) / 255.0f, GetBValue(color) / 255.0f, 1.0f);
 }

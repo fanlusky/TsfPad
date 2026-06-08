@@ -20,6 +20,8 @@ class CTextEditor : public CTextContainer
         _nSelEnd = 0;
         _pTextStore = NULL;
         _pDocumentMgr = NULL;
+        ZeroMemory(&_lfCurrentFont, sizeof(_lfCurrentFont));
+        _fHasFont = FALSE;
 
         _pCompositionRenderInfo = NULL;
         _nCompositionRenderInfo = 0;
@@ -51,8 +53,10 @@ class CTextEditor : public CTextContainer
     BOOL MoveSelectionUpDown(BOOL bUp);
     BOOL MoveSelectionToLineFirstEnd(BOOL bFirst);
 
-    void Render(HDC hdc, const LOGFONT *plf);
-    void UpdateLayout(const LOGFONT *plf);
+    BOOL InitializeRenderResources(IDWriteFactory *pDWriteFactory);
+    void SetFont(const LOGFONT *plf);
+    void Render(ID2D1HwndRenderTarget *pRenderTarget);
+    void UpdateLayout();
 
     UINT GetSelectionStart()
     {
@@ -62,9 +66,9 @@ class CTextEditor : public CTextContainer
     {
         return _nSelEnd;
     }
-    void BlinkCaret(HDC hdc)
+    void BlinkCaret()
     {
-        _layout.BlinkCaret(hdc);
+        _layout.ToggleCaretBlink();
     }
 
     void SetInterimCaret(BOOL fSet)
@@ -112,6 +116,8 @@ class CTextEditor : public CTextContainer
     HWND _hwnd;
 
     CTextLayout _layout;
+    LOGFONT _lfCurrentFont;
+    BOOL _fHasFont;
 
     CTextStore *_pTextStore;
     ITfDocumentMgr *_pDocumentMgr;

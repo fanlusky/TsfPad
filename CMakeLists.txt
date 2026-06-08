@@ -42,6 +42,8 @@ add_executable(${PROJECT_NAME} WIN32
 )
 
 target_link_libraries(${PROJECT_NAME} PUBLIC 
+    d2d1.lib
+    dwrite.lib
     imm32.lib
     fmt::fmt-header-only
 )

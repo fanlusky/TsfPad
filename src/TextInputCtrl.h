@@ -13,6 +13,9 @@ class CTextInputCtrl
     CTextInputCtrl()
     {
         _hwnd = NULL;
+        _pD2DFactory = NULL;
+        _pDWriteFactory = NULL;
+        _pRenderTarget = NULL;
         HFONT hfontTemp = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
         GetObject(hfontTemp, sizeof(LOGFONT), &_lfCurrentFont);
     }
@@ -35,7 +38,8 @@ class CTextInputCtrl
     void OnCreate(HWND hwnd, WPARAM wParam, LPARAM lParam);
     void OnDestroy();
     void OnSetFocus(WPARAM wParam, LPARAM lParam);
-    void OnPaint(HDC hdc);
+    void OnPaint();
+    void OnSize();
     void OnKeyDown(WPARAM wParam, LPARAM lParam);
     void OnLButtonDown(WPARAM wParam, LPARAM lParam);
     void OnLButtonUp(WPARAM wParam, LPARAM lParam);
@@ -61,8 +65,13 @@ class CTextInputCtrl
     void SetFont(HWND hwndParent);
 
   private:
+    BOOL CreateDeviceResources();
+    void DiscardDeviceResources();
     BOOL AleartMouseSink(LPARAM lParam);
     HWND _hwnd;
+    ID2D1Factory *_pD2DFactory;
+    IDWriteFactory *_pDWriteFactory;
+    ID2D1HwndRenderTarget *_pRenderTarget;
 
     CTextEditor _editor;
     LOGFONT _lfCurrentFont;

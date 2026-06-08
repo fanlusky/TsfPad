@@ -53,7 +53,6 @@ HWND CTextInputCtrl::Create(HWND hwndParent)
 
 LRESULT CALLBACK CTextInputCtrl::s_WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    HDC hdc;
     PAINTSTRUCT ps;
     CTextInputCtrl *ptic;
     switch (message)
@@ -82,10 +81,16 @@ LRESULT CALLBACK CTextInputCtrl::s_WndProc(HWND hwnd, UINT message, WPARAM wPara
 
     case WM_PAINT:
         ptic = GetThis(hwnd);
-        hdc = BeginPaint(hwnd, &ps);
+        BeginPaint(hwnd, &ps);
         if (ptic)
-            ptic->OnPaint(hdc);
+            ptic->OnPaint();
         EndPaint(hwnd, &ps);
+        break;
+
+    case WM_SIZE:
+        ptic = GetThis(hwnd);
+        if (ptic)
+            ptic->OnSize();
         break;
 
     case WM_KEYDOWN:
@@ -199,9 +204,8 @@ LRESULT CALLBACK CTextInputCtrl::s_WndProc(HWND hwnd, UINT message, WPARAM wPara
             ptic = GetThis(hwnd);
             if (ptic)
             {
-                HDC hdc = GetDC(hwnd);
-                ptic->_editor.BlinkCaret(hdc);
-                ReleaseDC(hwnd, hdc);
+                ptic->_editor.BlinkCaret();
+                InvalidateRect(hwnd, NULL, TRUE);
             }
         }
 
@@ -219,9 +223,117 @@ LRESULT CALLBACK CTextInputCtrl::s_WndProc(HWND hwnd, UINT message, WPARAM wPara
 //
 //----------------------------------------------------------------
 
-void CTextInputCtrl::OnPaint(HDC hdc)
+BOOL CTextInputCtrl::CreateDeviceResources()
 {
-    _editor.Render(hdc, &_lfCurrentFont);
+    if (_pRenderTarget)
+    {
+        return TRUE;
+    }
+
+    RECT rc = {};
+    GetClientRect(_hwnd, &rc);
+
+    if (!_pD2DFactory && FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &_pD2DFactory)))
+    {
+        return FALSE;
+    }
+
+    if (!_pDWriteFactory &&
+        FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+                                   reinterpret_cast<IUnknown **>(&_pDWriteFactory))))
+    {
+        return FALSE;
+    }
+
+    if (!_editor.InitializeRenderResources(_pDWriteFactory))
+    {
+        return FALSE;
+    }
+
+    const D2D1_SIZE_U size = D2D1::SizeU(max(rc.right, 1L), max(rc.bottom, 1L));
+    if (FAILED(_pD2DFactory->CreateHwndRenderTarget(
+            D2D1::RenderTargetProperties(),
+            D2D1::HwndRenderTargetProperties(_hwnd, size, D2D1_PRESENT_OPTIONS_IMMEDIATELY), &_pRenderTarget)))
+    {
+        return FALSE;
+    }
+
+    const FLOAT dpi = static_cast<FLOAT>(GetDpiForWindow(_hwnd));
+    _pRenderTarget->SetDpi(dpi, dpi);
+
+    return TRUE;
+}
+
+//----------------------------------------------------------------
+//
+//
+//
+//----------------------------------------------------------------
+
+void CTextInputCtrl::DiscardDeviceResources()
+{
+    if (_pRenderTarget)
+    {
+        _pRenderTarget->Release();
+        _pRenderTarget = NULL;
+    }
+
+    if (_pDWriteFactory)
+    {
+        _pDWriteFactory->Release();
+        _pDWriteFactory = NULL;
+    }
+
+    if (_pD2DFactory)
+    {
+        _pD2DFactory->Release();
+        _pD2DFactory = NULL;
+    }
+}
+
+//----------------------------------------------------------------
+//
+//
+//
+//----------------------------------------------------------------
+
+void CTextInputCtrl::OnPaint()
+{
+    if (!CreateDeviceResources())
+    {
+        return;
+    }
+
+    const FLOAT dpi = static_cast<FLOAT>(GetDpiForWindow(_hwnd));
+    _pRenderTarget->SetDpi(dpi, dpi);
+    _pRenderTarget->BeginDraw();
+    _pRenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::White));
+    _editor.Render(_pRenderTarget);
+    const HRESULT hr = _pRenderTarget->EndDraw();
+    if (hr == D2DERR_RECREATE_TARGET)
+    {
+        DiscardDeviceResources();
+    }
+}
+
+//----------------------------------------------------------------
+//
+//
+//
+//----------------------------------------------------------------
+
+void CTextInputCtrl::OnSize()
+{
+    if (_pRenderTarget)
+    {
+        RECT rc = {};
+        GetClientRect(_hwnd, &rc);
+        const FLOAT dpi = static_cast<FLOAT>(GetDpiForWindow(_hwnd));
+        _pRenderTarget->SetDpi(dpi, dpi);
+        _pRenderTarget->Resize(D2D1::SizeU(max(rc.right, 1L), max(rc.bottom, 1L)));
+    }
+
+    _editor.UpdateLayout();
 }
 
 //----------------------------------------------------------------
@@ -326,6 +438,7 @@ void CTextInputCtrl::OnKeyDown(WPARAM wParam, LPARAM lParam)
 void CTextInputCtrl::OnCreate(HWND hwnd, WPARAM wParam, LPARAM lParam)
 {
     _editor.SetWnd(hwnd);
+    _editor.SetFont(&_lfCurrentFont);
     _editor.InitTSF();
 }
 
@@ -338,6 +451,7 @@ void CTextInputCtrl::OnCreate(HWND hwnd, WPARAM wParam, LPARAM lParam)
 void CTextInputCtrl::OnDestroy()
 {
     _editor.UninitTSF();
+    DiscardDeviceResources();
 }
 
 //----------------------------------------------------------------
@@ -488,6 +602,7 @@ void CTextInputCtrl::SetFont(HWND hwndParent)
     if (ChooseFont(&cf))
     {
         _lfCurrentFont = lf;
+        _editor.SetFont(&_lfCurrentFont);
         InvalidateRect(_hwnd, NULL, TRUE);
     }
 }

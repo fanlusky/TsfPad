@@ -169,12 +169,7 @@ STDAPI CTextStore::SetSelection(ULONG ulCount, const TS_SELECTION_ACP *pSelectio
     if (ulCount > 0)
     {
         _pEditor->MoveSelection(pSelection[0].acpStart, pSelection[0].acpEnd);
-
-        CTextInputCtrl *pCtrl = CTextInputCtrl::GetThis(_pEditor->GetWnd());
-        if (pCtrl)
-        {
-            _pEditor->UpdateLayout(pCtrl->GetFont());
-        }
+        _pEditor->UpdateLayout();
         _pEditor->InvalidateRect();
         _pEditor->SetInterimCaret(pSelection->style.fInterimChar);
     }
@@ -255,6 +250,7 @@ STDAPI CTextStore::SetText(DWORD dwFlags, LONG acpStart, LONG acpEnd, __in_ecoun
 
     // Update selection after text change
     _pEditor->MoveSelection(acpStart + cch, acpStart + cch);
+    _pEditor->UpdateLayout();
 
     _pEditor->InvalidateRect();
     return S_OK;
@@ -527,6 +523,7 @@ STDAPI CTextStore::InsertTextAtSelection(DWORD dwFlags, __in_ecount(cch) const W
     }
 
     _pEditor->MoveSelection(acpStart, acpStart + cch);
+    _pEditor->UpdateLayout();
     _pEditor->InvalidateRect();
     return S_OK;
 }
