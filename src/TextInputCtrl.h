@@ -18,6 +18,8 @@ class CTextInputCtrl
         _pRenderTarget = NULL;
         HFONT hfontTemp = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
         GetObject(hfontTemp, sizeof(LOGFONT), &_lfCurrentFont);
+        _lfCurrentFont.lfHeight = -27;
+        wcscpy_s(_lfCurrentFont.lfFaceName, LF_FACESIZE, L"Noto Sans SC");
     }
 
     static ATOM RegisterClass(HINSTANCE hInstance);
