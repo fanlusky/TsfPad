@@ -47,3 +47,5 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     imm32.lib
     fmt::fmt-header-only
 )
+
+add_subdirectory("./standalone/TsfD2DTextBox")
