@@ -1,6 +1,5 @@
 #include <string>
 #include "TextEditor.h"
-#include <fmt/xchar.h>
 
 extern ITfThreadMgr *g_pThreadMgr;
 extern TfClientId g_TfClientId;
@@ -448,7 +447,6 @@ void CTextEditor::TerminateCompositionString()
         if (_pInputContext->QueryInterface(IID_ITfContextOwnerCompositionServices, (void **)&pCompositionServices) ==
             S_OK)
         {
-            OutputDebugString(L"TerminateCompositionString\n");
             pCompositionServices->TerminateComposition(_pTextStore->GetCurrentCompositionView());
             pCompositionServices->Release();
         }

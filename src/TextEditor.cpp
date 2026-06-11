@@ -1,6 +1,5 @@
 #include <string>
 #include "TextEditor.h"
-#include <fmt/xchar.h>
 
 extern ITfThreadMgr *g_pThreadMgr;
 extern TfClientId g_TfClientId;
@@ -291,49 +290,40 @@ void CTextEditor::UpdateLayout()
 
 BOOL CTextEditor::InitTSF()
 {
-    OutputDebugString(L"[TSF][TextEditor] InitTSF begin\n");
-
     _pTextStore = new CTextStore(this);
     if (!_pTextStore)
     {
-        OutputDebugString(L"[TSF][TextEditor] InitTSF failed: _pTextStore allocation\n");
         return FALSE;
     }
 
     if (FAILED(g_pThreadMgr->CreateDocumentMgr(&_pDocumentMgr)))
     {
-        OutputDebugString(L"[TSF][TextEditor] InitTSF failed: CreateDocumentMgr\n");
         return FALSE;
     }
 
     if (FAILED(_pDocumentMgr->CreateContext(g_TfClientId, 0, (ITextStoreACP *)_pTextStore, &_pInputContext,
                                             &_ecTextStore)))
     {
-        OutputDebugString(L"[TSF][TextEditor] InitTSF failed: CreateContext\n");
         return FALSE;
     }
 
     if (FAILED(_pDocumentMgr->Push(_pInputContext)))
     {
-        OutputDebugString(L"[TSF][TextEditor] InitTSF failed: Push\n");
         return FALSE;
     }
 
     ITfDocumentMgr *pDocumentMgrPrev;
     g_pThreadMgr->AssociateFocus(_hwnd, _pDocumentMgr, &pDocumentMgrPrev);
-    OutputDebugString(L"[TSF][TextEditor] InitTSF AssociateFocus done\n");
     if (pDocumentMgrPrev)
         pDocumentMgrPrev->Release();
 
     _pTextEditSink = new CTextEditSink(this);
     if (!_pTextEditSink)
     {
-        OutputDebugString(L"[TSF][TextEditor] InitTSF failed: _pTextEditSink allocation\n");
         return FALSE;
     }
 
     _pTextEditSink->_Advise(_pInputContext);
-    OutputDebugString(L"[TSF][TextEditor] InitTSF end\n");
 
     return TRUE;
 }
@@ -387,7 +377,6 @@ BOOL CTextEditor::UninitTSF()
 
 void CTextEditor::SetFocusDocumentMgr()
 {
-    OutputDebugString(L"[TSF][TextEditor] SetFocusDocumentMgr\n");
     if (_pDocumentMgr)
     {
         // g_pThreadMgr->SetFocus(_pDocumentMgr);
@@ -457,7 +446,6 @@ void CTextEditor::TerminateCompositionString()
         if (_pInputContext->QueryInterface(IID_ITfContextOwnerCompositionServices, (void **)&pCompositionServices) ==
             S_OK)
         {
-            OutputDebugString(L"TerminateCompositionString\n");
             pCompositionServices->TerminateComposition(_pTextStore->GetCurrentCompositionView());
             pCompositionServices->Release();
         }

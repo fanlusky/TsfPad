@@ -1,6 +1,5 @@
 #include "TextInputCtrl.h"
 #include "commdlg.h"
-#include <fmt/xchar.h>
 
 extern HINSTANCE g_hInst;
 
@@ -73,7 +72,6 @@ LRESULT CALLBACK CTextInputCtrl::s_WndProc(HWND hwnd, UINT message, WPARAM wPara
         break;
 
     case WM_SETFOCUS:
-        OutputDebugString(L"[TSF][Wnd] WM_SETFOCUS\n");
         ptic = GetThis(hwnd);
         if (ptic)
         {
@@ -135,9 +133,6 @@ LRESULT CALLBACK CTextInputCtrl::s_WndProc(HWND hwnd, UINT message, WPARAM wPara
         break;
 
     case WM_IME_COMPOSITION:
-        OutputDebugString(fmt::format(L"[TSF][Wnd] WM_IME_COMPOSITION lParam=0x{:08X}\n",
-                                      static_cast<unsigned int>(lParam))
-                              .c_str());
         if (lParam & GCS_RESULTSTR)
         {
             HIMC himc = ImmGetContext(hwnd);
@@ -174,8 +169,6 @@ LRESULT CALLBACK CTextInputCtrl::s_WndProc(HWND hwnd, UINT message, WPARAM wPara
         return DefWindowProc(hwnd, message, wParam, lParam);
 
     case WM_IME_CHAR:
-        OutputDebugString(fmt::format(L"[TSF][Wnd] WM_IME_CHAR wParam=0x{:04X}\n", static_cast<unsigned int>(wParam))
-                              .c_str());
         //
         // wParam is a character of the result string.
         // if we don't want to receive WM_CHAR message for this character,
@@ -184,7 +177,6 @@ LRESULT CALLBACK CTextInputCtrl::s_WndProc(HWND hwnd, UINT message, WPARAM wPara
         return DefWindowProc(hwnd, message, wParam, lParam);
 
     case WM_CHAR:
-        OutputDebugString(fmt::format(L"[TSF][Wnd] WM_CHAR wParam=0x{:04X}\n", static_cast<unsigned int>(wParam)).c_str());
         //
         // wParam is a character of the result string.
         //

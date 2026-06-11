@@ -3,7 +3,6 @@
 #include "TextInputCtrl.h"
 #include "InputScope.h"
 #include "tsattrs.h"
-#include <fmt/xchar.h>
 
 //+---------------------------------------------------------------------------
 //
@@ -454,7 +453,7 @@ STDAPI CTextStore::GetScreenExt(TsViewCookie vcView, RECT *prc)
     GetClientRect(_pEditor->GetWnd(), prc);
     ClientToScreen(_pEditor->GetWnd(), (POINT *)&prc->left);
     ClientToScreen(_pEditor->GetWnd(), (POINT *)&prc->right);
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 //----------------------------------------------------------------------------
@@ -615,17 +614,14 @@ STDAPI CTextStore::UnadviseMouseSink(DWORD dwCookie)
 //
 //----------------------------------------------------------------------------
 
-#define IF_ATTR_INPUTSCOPE 1
-#define IF_ATTR_FONT_STYLE_HEIGHT 2
-#define IF_ATTR_FONT_FACENAME 3
-#define IF_ATTR_FONT_SIZEPTS 4
-#define IF_ATTR_TEXT_READONLY 5
-#define IF_ATTR_TEXT_ORIENTATION 6
-#define IF_ATTR_TEXT_VERTICALWRITING 7
+#define IF_ATTR_FONT_STYLE_HEIGHT 1
+#define IF_ATTR_FONT_SIZEPTS 2
+#define IF_ATTR_TEXT_READONLY 3
+#define IF_ATTR_TEXT_ORIENTATION 4
+#define IF_ATTR_TEXT_VERTICALWRITING 5
 
-const GUID *c_rgSupportedAttr[7] = {
-    &GUID_PROP_INPUTSCOPE,   &TSATTRID_Font_Style_Height, &TSATTRID_Font_FaceName,       &TSATTRID_Font_SizePts,
-    &TSATTRID_Text_ReadOnly, &TSATTRID_Text_Orientation,  &TSATTRID_Text_VerticalWriting};
+const GUID *c_rgSupportedAttr[5] = {&TSATTRID_Font_Style_Height, &TSATTRID_Font_SizePts, &TSATTRID_Text_ReadOnly,
+                                    &TSATTRID_Text_Orientation, &TSATTRID_Text_VerticalWriting};
 
 void CTextStore::PrepareAttributes(ULONG cFilterAttrs, const TS_ATTRID *paFilterAttrs)
 {
@@ -657,19 +653,9 @@ void CTextStore::PrepareAttributes(ULONG cFilterAttrs, const TS_ATTRID *paFilter
 
         switch (i + 1)
         {
-        case IF_ATTR_INPUTSCOPE:
-            _attrval[_nAttrVals].varValue.vt = VT_UNKNOWN;
-            _attrval[_nAttrVals].varValue.punkVal = NULL;
-            break;
-
         case IF_ATTR_FONT_STYLE_HEIGHT:
             _attrval[_nAttrVals].varValue.vt = VT_I4;
             _attrval[_nAttrVals].varValue.lVal = _pEditor->GetLineHeight();
-            break;
-
-        case IF_ATTR_FONT_FACENAME:
-            _attrval[_nAttrVals].varValue.vt = VT_BSTR;
-            _attrval[_nAttrVals].varValue.bstrVal = NULL;
             break;
 
         case IF_ATTR_FONT_SIZEPTS:
@@ -712,7 +698,6 @@ STDAPI CTextStore::OnStartComposition(ITfCompositionView *pComposition, BOOL *pf
     }
 
     _pCurrentCompositionView = pComposition;
-    OutputDebugString(fmt::format(L"fanyfull OnStartComposition").c_str());
     _pCurrentCompositionView->AddRef();
 
     *pfOk = TRUE;
@@ -732,8 +717,6 @@ STDAPI CTextStore::OnUpdateComposition(ITfCompositionView *pComposition, ITfRang
         _pCurrentCompositionView->Release();
         _pCurrentCompositionView = NULL;
     }
-
-    OutputDebugString(fmt::format(L"fanyfull OnUpdateComposition").c_str());
 
     _pCurrentCompositionView = pComposition;
     _pCurrentCompositionView->AddRef();
