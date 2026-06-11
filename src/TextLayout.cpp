@@ -303,10 +303,11 @@ BOOL CTextLayout::Render(ID2D1HwndRenderTarget *pRenderTarget, const WCHAR *psz,
                 if (composition.nEnd < line.nPos + line.nCnt)
                     nCompEndInLine = composition.nEnd - line.nPos;
 
+                D2D1_RECT_F underlineRect = {};
+                BOOL hasUnderlineRect = FALSE;
                 for (UINT k = nCompStartInLine; k < nCompEndInLine; k++)
                 {
                     const D2D1_RECT_F &rc = line.prgCharInfo[k].rc;
-                    const BOOL bClause = (k + 1 == nCompEndInLine);
 
                     if (composition.da.crBk.type != TF_CT_NONE)
                     {
@@ -327,10 +328,24 @@ BOOL CTextLayout::Render(ID2D1HwndRenderTarget *pRenderTarget, const WCHAR *psz,
                                              pCompositionBrush, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
                                              DWRITE_MEASURING_MODE_NATURAL);
 
-                    if (composition.da.lsStyle != TF_LS_NONE)
+                    if (!hasUnderlineRect)
                     {
-                        DrawUnderline(pRenderTarget, &composition.da, rc, bClause);
+                        underlineRect = rc;
+                        hasUnderlineRect = TRUE;
                     }
+                    else
+                    {
+                        underlineRect.left = min(underlineRect.left, rc.left);
+                        underlineRect.top = min(underlineRect.top, rc.top);
+                        underlineRect.right = max(underlineRect.right, rc.right);
+                        underlineRect.bottom = max(underlineRect.bottom, rc.bottom);
+                    }
+                }
+
+                if (hasUnderlineRect && composition.da.lsStyle != TF_LS_NONE)
+                {
+                    const BOOL bClause = composition.nEnd <= static_cast<int>(line.nPos + line.nCnt);
+                    DrawUnderline(pRenderTarget, &composition.da, underlineRect, bClause);
                 }
             }
         }
@@ -569,10 +584,10 @@ void CTextLayout::DrawUnderline(ID2D1HwndRenderTarget *pRenderTarget, const TF_D
         return;
     }
 
-    FLOAT strokeWidth = (_lineHeightDips / 18.0f) + PixelsToDipsX(1.0f);
+    FLOAT strokeWidth = max(PixelsToDipsY(1.0f), _lineHeightDips / 24.0f);
     if (pda->fBoldLine)
     {
-        strokeWidth *= 2.0f;
+        strokeWidth *= 1.5f;
     }
 
     const FLOAT left = static_cast<FLOAT>(rc.left);
@@ -585,25 +600,33 @@ void CTextLayout::DrawUnderline(ID2D1HwndRenderTarget *pRenderTarget, const TF_D
     case TF_LS_DASH:
     case TF_LS_SQUIGGLE:
     {
-        const FLOAT segment = max(strokeWidth * 1.5f, 2.0f);
-        const FLOAT gap = pda->lsStyle == TF_LS_DASH ? strokeWidth * 2.0f : strokeWidth;
-        FLOAT x = left;
-        FLOAT yOffset = 0.0f;
-        while (x < right)
+        if (pda->lsStyle == TF_LS_SQUIGGLE)
         {
-            const FLOAT endX = min(x + segment, right);
-            if (pda->lsStyle == TF_LS_SQUIGGLE)
+            const FLOAT halfWave = max(PixelsToDipsX(3.0f), strokeWidth * 3.0f);
+            const FLOAT amplitude = max(PixelsToDipsY(0.75f), strokeWidth * 0.6f);
+            FLOAT x = left;
+            BOOL rise = TRUE;
+            while (x < right)
             {
-                const FLOAT waveHeight = strokeWidth;
-                pRenderTarget->DrawLine(D2D1::Point2F(x, baseline + yOffset), D2D1::Point2F(endX, baseline - yOffset),
-                                        pBrush, strokeWidth);
-                yOffset = waveHeight - yOffset;
+                const FLOAT endX = min(x + halfWave, right);
+                const FLOAT y0 = rise ? baseline + amplitude : baseline - amplitude;
+                const FLOAT y1 = rise ? baseline - amplitude : baseline + amplitude;
+                pRenderTarget->DrawLine(D2D1::Point2F(x, y0), D2D1::Point2F(endX, y1), pBrush, strokeWidth);
+                rise = !rise;
+                x = endX;
             }
-            else
+        }
+        else
+        {
+            const FLOAT segment = pda->lsStyle == TF_LS_DASH ? max(PixelsToDipsX(5.0f), strokeWidth * 4.0f)
+                                                             : max(PixelsToDipsX(1.0f), strokeWidth);
+            const FLOAT gap = pda->lsStyle == TF_LS_DASH ? max(PixelsToDipsX(3.0f), strokeWidth * 2.0f)
+                                                         : max(PixelsToDipsX(2.0f), strokeWidth * 1.5f);
+            for (FLOAT x = left; x < right; x += segment + gap)
             {
+                const FLOAT endX = min(x + segment, right);
                 pRenderTarget->DrawLine(D2D1::Point2F(x, baseline), D2D1::Point2F(endX, baseline), pBrush, strokeWidth);
             }
-            x = endX + gap;
         }
         break;
     }
