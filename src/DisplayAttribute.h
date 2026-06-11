@@ -70,7 +70,7 @@ HRESULT UninitDisplayAttrbute();
 HRESULT GetDisplayAttributeTrackPropertyRange(TfEditCookie ec, ITfContext *pic, ITfRange *pRange,
                                               ITfReadOnlyProperty **ppProp, CDispAttrProps *pDispAttrProps);
 HRESULT GetDisplayAttributeData(TfEditCookie ec, ITfReadOnlyProperty *pProp, ITfRange *pRange, TF_DISPLAYATTRIBUTE *pda,
-                                TfClientId *pguid);
+                                TfGuidAtom *pguid);
 
 HRESULT GetAttributeColor(TF_DA_COLOR *pdac, COLORREF *pcr);
 HRESULT SetAttributeColor(TF_DA_COLOR *pdac, COLORREF cr);

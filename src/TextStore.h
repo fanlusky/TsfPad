@@ -121,11 +121,11 @@ class CTextStore : public ITextStoreACP, public ITfContextOwnerCompositionSink, 
     void OnMouseEvent(UINT uEdge, UINT uQuadrant, DWORD dwBtnState, BOOL *pbEaten)
     {
         *pbEaten = FALSE;
-        for (UINT i = 1; i < _nMouseSinks; i++)
+        for (UINT i = 0; i < _nMouseSinks; i++)
         {
-            if (_prgMouseSinks->pMouseSink)
+            if (_prgMouseSinks[i].pMouseSink)
             {
-                _prgMouseSinks->pMouseSink->OnMouseEvent(uEdge, uQuadrant, dwBtnState, pbEaten);
+                _prgMouseSinks[i].pMouseSink->OnMouseEvent(uEdge, uQuadrant, dwBtnState, pbEaten);
                 if (*pbEaten)
                     break;
             }

@@ -64,17 +64,23 @@ STDAPI_(ULONG) CTextStore::Release()
 
 STDAPI CTextStore::AdviseSink(REFIID riid, IUnknown *punk, DWORD dwMask)
 {
+    OutputDebugString(fmt::format(L"[TSF][TextStore] AdviseSink mask=0x{:08X} punk={}\n",
+                                  static_cast<unsigned int>(dwMask), (void *)punk)
+                          .c_str());
 
     if (!IsEqualGUID(riid, IID_ITextStoreACPSink))
     {
+        OutputDebugString(L"[TSF][TextStore] AdviseSink no object: unsupported riid\n");
         return TS_E_NOOBJECT;
     }
 
     if (FAILED(punk->QueryInterface(IID_ITextStoreACPSink, (void **)&_pSink)))
     {
+        OutputDebugString(L"[TSF][TextStore] AdviseSink QueryInterface failed\n");
         return E_NOINTERFACE;
     }
 
+    OutputDebugString(L"[TSF][TextStore] AdviseSink success\n");
     return S_OK;
 }
 
@@ -87,8 +93,11 @@ STDAPI CTextStore::AdviseSink(REFIID riid, IUnknown *punk, DWORD dwMask)
 STDAPI CTextStore::UnadviseSink(IUnknown *punk)
 {
     // we're dealing with TSF. We don't have to check punk is same instance of _pSink.
-    _pSink->Release();
-    _pSink = NULL;
+    if (_pSink)
+    {
+        _pSink->Release();
+        _pSink = NULL;
+    }
 
     return S_OK;
 }
@@ -101,6 +110,9 @@ STDAPI CTextStore::UnadviseSink(IUnknown *punk)
 
 STDAPI CTextStore::RequestLock(DWORD dwLockFlags, HRESULT *phrSession)
 {
+    OutputDebugString(fmt::format(L"[TSF][TextStore] RequestLock flags=0x{:08X} sink={}\n",
+                                  static_cast<unsigned int>(dwLockFlags), (void *)_pSink)
+                          .c_str());
     if (!_pSink)
     {
         return E_UNEXPECTED;
@@ -118,6 +130,7 @@ STDAPI CTextStore::RequestLock(DWORD dwLockFlags, HRESULT *phrSession)
 
 STDAPI CTextStore::GetStatus(TS_STATUS *pdcs)
 {
+    OutputDebugString(L"[TSF][TextStore] GetStatus\n");
     pdcs->dwDynamicFlags = 0;
     pdcs->dwStaticFlags = 0;
     return S_OK;
@@ -145,6 +158,7 @@ STDAPI CTextStore::QueryInsert(LONG acpInsertStart, LONG acpInsertEnd, ULONG cch
 
 STDAPI CTextStore::GetSelection(ULONG ulIndex, ULONG ulCount, TS_SELECTION_ACP *pSelection, ULONG *pcFetched)
 {
+    OutputDebugString(fmt::format(L"[TSF][TextStore] GetSelection index={} count={}\n", ulIndex, ulCount).c_str());
     *pcFetched = 0;
     if ((ulCount > 0) && ((ulIndex == 0) || (ulIndex == TS_DEFAULT_SELECTION)))
     {
@@ -226,16 +240,24 @@ STDAPI CTextStore::GetText(LONG acpStart, LONG acpEnd, __out_ecount(cchPlainReq)
 STDAPI CTextStore::SetText(DWORD dwFlags, LONG acpStart, LONG acpEnd, __in_ecount(cch) const WCHAR *pchText, ULONG cch,
                            TS_TEXTCHANGE *pChange)
 {
+    OutputDebugString(fmt::format(L"[TSF][TextStore] SetText flags=0x{:08X} start={} end={} cch={} hasComp={}\n",
+                                  static_cast<unsigned int>(dwFlags), acpStart, acpEnd, cch,
+                                  _pCurrentCompositionView != NULL)
+                          .c_str());
     // Check the composition status
     if (cch == 0 && _pCurrentCompositionView)
     {
+        OutputDebugString(L"[TSF][TextStore] SetText requests terminate composition\n");
         _pEditor->TerminateCompositionString();
     }
 
     LONG acpRemovingEnd;
 
     if (acpStart > (LONG)_pEditor->GetTextLength())
+    {
+        OutputDebugString(L"[TSF][TextStore] SetText invalid argument: start beyond text length\n");
         return E_INVALIDARG;
+    }
 
     acpRemovingEnd = min(acpEnd, (LONG)_pEditor->GetTextLength() + 1);
     if (!_pEditor->RemoveText(acpStart, acpRemovingEnd - acpStart))
@@ -253,6 +275,7 @@ STDAPI CTextStore::SetText(DWORD dwFlags, LONG acpStart, LONG acpEnd, __in_ecoun
     _pEditor->UpdateLayout();
 
     _pEditor->InvalidateRect();
+    OutputDebugString(fmt::format(L"[TSF][TextStore] SetText complete newEnd={}\n", pChange->acpNewEnd).c_str());
     return S_OK;
 }
 
@@ -298,6 +321,9 @@ STDAPI CTextStore::InsertEmbedded(DWORD dwFlags, LONG acpStart, LONG acpEnd, IDa
 
 STDAPI CTextStore::RequestSupportedAttrs(DWORD dwFlags, ULONG cFilterAttrs, const TS_ATTRID *paFilterAttrs)
 {
+    OutputDebugString(fmt::format(L"[TSF][TextStore] RequestSupportedAttrs flags=0x{:08X} filterCount={}\n",
+                                  static_cast<unsigned int>(dwFlags), cFilterAttrs)
+                          .c_str());
     PrepareAttributes(cFilterAttrs, paFilterAttrs);
     if (!_nAttrVals)
         return S_FALSE;
@@ -313,6 +339,9 @@ STDAPI CTextStore::RequestSupportedAttrs(DWORD dwFlags, ULONG cFilterAttrs, cons
 STDAPI CTextStore::RequestAttrsAtPosition(LONG acpPos, ULONG cFilterAttrs, const TS_ATTRID *paFilterAttrs,
                                           DWORD dwFlags)
 {
+    OutputDebugString(fmt::format(L"[TSF][TextStore] RequestAttrsAtPosition pos={} flags=0x{:08X} filterCount={}\n",
+                                  acpPos, static_cast<unsigned int>(dwFlags), cFilterAttrs)
+                          .c_str());
     PrepareAttributes(cFilterAttrs, paFilterAttrs);
     if (!_nAttrVals)
         return S_FALSE;
@@ -355,6 +384,7 @@ STDAPI CTextStore::FindNextAttrTransition(LONG acpStart, LONG acpHalt, ULONG cFi
 
 STDAPI CTextStore::RetrieveRequestedAttrs(ULONG ulCount, TS_ATTRVAL *paAttrVals, ULONG *pcFetched)
 {
+    OutputDebugString(fmt::format(L"[TSF][TextStore] RetrieveRequestedAttrs count={}\n", ulCount).c_str());
     *pcFetched = 0;
     for (int i = 0; (i < (int)ulCount) && (i < _nAttrVals); i++)
     {
@@ -408,6 +438,8 @@ STDAPI CTextStore::GetACPFromPoint(TsViewCookie vcView, const POINT *pt, DWORD d
 
 STDAPI CTextStore::GetTextExt(TsViewCookie vcView, LONG acpStart, LONG acpEnd, RECT *prc, BOOL *pfClipped)
 {
+    OutputDebugString(fmt::format(L"[TSF][TextStore] GetTextExt view={} start={} end={}\n", vcView, acpStart, acpEnd)
+                          .c_str());
     RECT rcStart;
     RECT rcEnd;
 
@@ -451,10 +483,11 @@ STDAPI CTextStore::GetTextExt(TsViewCookie vcView, LONG acpStart, LONG acpEnd, R
 
 STDAPI CTextStore::GetScreenExt(TsViewCookie vcView, RECT *prc)
 {
+    OutputDebugString(fmt::format(L"[TSF][TextStore] GetScreenExt view={}\n", vcView).c_str());
     GetClientRect(_pEditor->GetWnd(), prc);
     ClientToScreen(_pEditor->GetWnd(), (POINT *)&prc->left);
     ClientToScreen(_pEditor->GetWnd(), (POINT *)&prc->right);
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 //----------------------------------------------------------------------------
@@ -465,6 +498,7 @@ STDAPI CTextStore::GetScreenExt(TsViewCookie vcView, RECT *prc)
 
 STDAPI CTextStore::GetWnd(TsViewCookie vcView, HWND *phwnd)
 {
+    OutputDebugString(fmt::format(L"[TSF][TextStore] GetWnd view={}\n", vcView).c_str());
     *phwnd = _pEditor->GetWnd();
     return S_OK;
 }
@@ -491,6 +525,9 @@ STDAPI CTextStore::InsertTextAtSelection(DWORD dwFlags, __in_ecount(cch) const W
 {
     LONG acpStart = _pEditor->GetSelectionStart();
     LONG acpEnd = _pEditor->GetSelectionEnd();
+    OutputDebugString(fmt::format(L"[TSF][TextStore] InsertTextAtSelection flags=0x{:08X} selStart={} selEnd={} cch={}\n",
+                                  static_cast<unsigned int>(dwFlags), acpStart, acpEnd, cch)
+                          .c_str());
 
     if (dwFlags & TS_IAS_QUERYONLY)
     {
@@ -525,6 +562,8 @@ STDAPI CTextStore::InsertTextAtSelection(DWORD dwFlags, __in_ecount(cch) const W
     _pEditor->MoveSelection(acpStart, acpStart + cch);
     _pEditor->UpdateLayout();
     _pEditor->InvalidateRect();
+    OutputDebugString(fmt::format(L"[TSF][TextStore] InsertTextAtSelection complete newSelEnd={}\n", acpStart + cch)
+                          .c_str());
     return S_OK;
 }
 
@@ -600,6 +639,21 @@ STDAPI CTextStore::AdviseMouseSink(ITfRangeACP *range, ITfMouseSink *pSink, DWOR
 
 STDAPI CTextStore::UnadviseMouseSink(DWORD dwCookie)
 {
+    if ((dwCookie == 0) || (dwCookie > _nMouseSinks))
+    {
+        return E_INVALIDARG;
+    }
+
+    if (_prgMouseSinks == NULL)
+    {
+        return E_UNEXPECTED;
+    }
+
+    if (_prgMouseSinks[dwCookie - 1].pRange == NULL || _prgMouseSinks[dwCookie - 1].pMouseSink == NULL)
+    {
+        return E_INVALIDARG;
+    }
+
     _prgMouseSinks[dwCookie - 1].pRange->Release();
     _prgMouseSinks[dwCookie - 1].pRange = NULL;
 
@@ -615,17 +669,14 @@ STDAPI CTextStore::UnadviseMouseSink(DWORD dwCookie)
 //
 //----------------------------------------------------------------------------
 
-#define IF_ATTR_INPUTSCOPE 1
-#define IF_ATTR_FONT_STYLE_HEIGHT 2
-#define IF_ATTR_FONT_FACENAME 3
-#define IF_ATTR_FONT_SIZEPTS 4
-#define IF_ATTR_TEXT_READONLY 5
-#define IF_ATTR_TEXT_ORIENTATION 6
-#define IF_ATTR_TEXT_VERTICALWRITING 7
+#define IF_ATTR_FONT_STYLE_HEIGHT 1
+#define IF_ATTR_FONT_SIZEPTS 2
+#define IF_ATTR_TEXT_READONLY 3
+#define IF_ATTR_TEXT_ORIENTATION 4
+#define IF_ATTR_TEXT_VERTICALWRITING 5
 
-const GUID *c_rgSupportedAttr[7] = {
-    &GUID_PROP_INPUTSCOPE,   &TSATTRID_Font_Style_Height, &TSATTRID_Font_FaceName,       &TSATTRID_Font_SizePts,
-    &TSATTRID_Text_ReadOnly, &TSATTRID_Text_Orientation,  &TSATTRID_Text_VerticalWriting};
+const GUID *c_rgSupportedAttr[5] = {&TSATTRID_Font_Style_Height, &TSATTRID_Font_SizePts, &TSATTRID_Text_ReadOnly,
+                                    &TSATTRID_Text_Orientation, &TSATTRID_Text_VerticalWriting};
 
 void CTextStore::PrepareAttributes(ULONG cFilterAttrs, const TS_ATTRID *paFilterAttrs)
 {
@@ -657,19 +708,9 @@ void CTextStore::PrepareAttributes(ULONG cFilterAttrs, const TS_ATTRID *paFilter
 
         switch (i + 1)
         {
-        case IF_ATTR_INPUTSCOPE:
-            _attrval[_nAttrVals].varValue.vt = VT_UNKNOWN;
-            _attrval[_nAttrVals].varValue.punkVal = NULL;
-            break;
-
         case IF_ATTR_FONT_STYLE_HEIGHT:
             _attrval[_nAttrVals].varValue.vt = VT_I4;
             _attrval[_nAttrVals].varValue.lVal = _pEditor->GetLineHeight();
-            break;
-
-        case IF_ATTR_FONT_FACENAME:
-            _attrval[_nAttrVals].varValue.vt = VT_BSTR;
-            _attrval[_nAttrVals].varValue.bstrVal = NULL;
             break;
 
         case IF_ATTR_FONT_SIZEPTS:
@@ -712,7 +753,7 @@ STDAPI CTextStore::OnStartComposition(ITfCompositionView *pComposition, BOOL *pf
     }
 
     _pCurrentCompositionView = pComposition;
-    OutputDebugString(fmt::format(L"fanyfull OnStartComposition").c_str());
+    OutputDebugString(fmt::format(L"[TSF][TextStore] OnStartComposition view={}\n", (void *)pComposition).c_str());
     _pCurrentCompositionView->AddRef();
 
     *pfOk = TRUE;
@@ -733,7 +774,9 @@ STDAPI CTextStore::OnUpdateComposition(ITfCompositionView *pComposition, ITfRang
         _pCurrentCompositionView = NULL;
     }
 
-    OutputDebugString(fmt::format(L"fanyfull OnUpdateComposition").c_str());
+    OutputDebugString(fmt::format(L"[TSF][TextStore] OnUpdateComposition view={} range={}\n", (void *)pComposition,
+                                  (void *)pRangeNew)
+                          .c_str());
 
     _pCurrentCompositionView = pComposition;
     _pCurrentCompositionView->AddRef();
@@ -754,6 +797,7 @@ STDAPI CTextStore::OnEndComposition(ITfCompositionView *pComposition)
         _pCurrentCompositionView = NULL;
     }
 
+    OutputDebugString(fmt::format(L"[TSF][TextStore] OnEndComposition view={}\n", (void *)pComposition).c_str());
     // Reset selection to current position
     LONG nSelStart = _pEditor->GetSelectionStart();
     _pEditor->MoveSelection(nSelStart, nSelStart);

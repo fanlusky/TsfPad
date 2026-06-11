@@ -1,6 +1,7 @@
 #include "TextEditSink.h"
 #include "TextEditor.h"
 #include "DisplayAttribute.h"
+#include <fmt/xchar.h>
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -72,6 +73,9 @@ CTextEditSink::CTextEditSink(CTextEditor *pEditor)
 
 STDAPI CTextEditSink::OnEndEdit(ITfContext *pic, TfEditCookie ecReadOnly, ITfEditRecord *pEditRecord)
 {
+    OutputDebugString(fmt::format(L"[TSF][TextEditSink] OnEndEdit begin pic={} editRecord={}\n", (void *)pic,
+                                  (void *)pEditRecord)
+                          .c_str());
     CDispAttrProps *pDispAttrProps = GetDispAttrProps();
     if (pDispAttrProps)
     {
@@ -83,6 +87,7 @@ STDAPI CTextEditSink::OnEndEdit(ITfContext *pic, TfEditCookie ecReadOnly, ITfEdi
             ITfRange *pRange;
             if (pEnum->Next(1, &pRange, NULL) == S_OK)
             {
+                OutputDebugString(L"[TSF][TextEditSink] property update range detected\n");
                 // We check if there is a range to be changed.
                 pRange->Release();
 
@@ -96,30 +101,55 @@ STDAPI CTextEditSink::OnEndEdit(ITfContext *pic, TfEditCookie ecReadOnly, ITfEdi
                     SUCCEEDED(pic->GetEnd(ecReadOnly, &pRangeEnd)) &&
                     SUCCEEDED(pRangeEntire->ShiftEndToRange(ecReadOnly, pRangeEnd, TF_ANCHOR_END)))
                 {
-                    IEnumTfRanges *pEnumRanges;
+                    IEnumTfRanges *pEnumRanges = NULL;
                     ITfReadOnlyProperty *pProp = NULL;
 
-                    GetDisplayAttributeTrackPropertyRange(ecReadOnly, pic, pRangeEntire, &pProp, pDispAttrProps);
-
-                    if (SUCCEEDED(pProp->EnumRanges(ecReadOnly, &pEnumRanges, pRangeEntire)))
+                    if (SUCCEEDED(
+                            GetDisplayAttributeTrackPropertyRange(ecReadOnly, pic, pRangeEntire, &pProp, pDispAttrProps)) &&
+                        pProp)
                     {
-                        while (pEnumRanges->Next(1, &pRange, NULL) == S_OK)
+                        OutputDebugString(fmt::format(L"[TSF][TextEditSink] track property acquired prop={}\n", (void *)pProp)
+                                              .c_str());
+                        if (SUCCEEDED(pProp->EnumRanges(ecReadOnly, &pEnumRanges, pRangeEntire)) && pEnumRanges)
                         {
-                            TF_DISPLAYATTRIBUTE da;
-                            TfGuidAtom guid;
-                            if (GetDisplayAttributeData(ecReadOnly, pProp, pRange, &da, &guid) == S_OK)
+                            while (pEnumRanges->Next(1, &pRange, NULL) == S_OK)
                             {
-                                ITfRangeACP *pRangeACP;
-                                if (pRange->QueryInterface(IID_ITfRangeACP, (void **)&pRangeACP) == S_OK)
+                                TF_DISPLAYATTRIBUTE da;
+                                TfGuidAtom guid;
+                                if (GetDisplayAttributeData(ecReadOnly, pProp, pRange, &da, &guid) == S_OK)
                                 {
-                                    LONG nStart;
-                                    LONG nEnd;
-                                    pRangeACP->GetExtent(&nStart, &nEnd);
-                                    _pEditor->AddCompositionRenderInfo(nStart, nStart + nEnd, &da);
-                                    pRangeACP->Release();
+                                    ITfRangeACP *pRangeACP;
+                                    if (pRange->QueryInterface(IID_ITfRangeACP, (void **)&pRangeACP) == S_OK)
+                                    {
+                                        LONG nStart;
+                                        LONG nEnd;
+                                        pRangeACP->GetExtent(&nStart, &nEnd);
+                                        OutputDebugString(fmt::format(
+                                                              L"[TSF][TextEditSink] composition attr extent start={} len={} guidAtom={}\n",
+                                                              nStart, nEnd, guid)
+                                                              .c_str());
+                                        _pEditor->AddCompositionRenderInfo(nStart, nStart + nEnd, &da);
+                                        pRangeACP->Release();
+                                    }
                                 }
+                                else
+                                {
+                                    OutputDebugString(L"[TSF][TextEditSink] GetDisplayAttributeData returned non-S_OK\n");
+                                }
+                                pRange->Release();
                             }
+                            pEnumRanges->Release();
                         }
+                        else
+                        {
+                            OutputDebugString(L"[TSF][TextEditSink] EnumRanges failed or returned null\n");
+                        }
+
+                        pProp->Release();
+                    }
+                    else
+                    {
+                        OutputDebugString(L"[TSF][TextEditSink] GetDisplayAttributeTrackPropertyRange failed or returned null\n");
                     }
                 }
 
@@ -133,7 +163,12 @@ STDAPI CTextEditSink::OnEndEdit(ITfContext *pic, TfEditCookie ecReadOnly, ITfEdi
 
         delete pDispAttrProps;
     }
+    else
+    {
+        OutputDebugString(L"[TSF][TextEditSink] GetDispAttrProps returned null\n");
+    }
 
+    OutputDebugString(L"[TSF][TextEditSink] OnEndEdit end\n");
     return S_OK;
 }
 

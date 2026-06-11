@@ -179,15 +179,24 @@ HRESULT GetDisplayAttributeTrackPropertyRange( //
     ULONG i;
 
     if (!pDispAttrProps)
+    {
+        OutputDebugString(L"[TSF][DisplayAttr] no property table\n");
         goto Exit;
+    }
 
     pguidProp = pDispAttrProps->GetPropTable();
     if (!pguidProp)
+    {
+        OutputDebugString(L"[TSF][DisplayAttr] property guid table is null\n");
         goto Exit;
+    }
 
     ulNumProp = pDispAttrProps->Count();
     if (!ulNumProp)
+    {
+        OutputDebugString(L"[TSF][DisplayAttr] property count is zero\n");
         goto Exit;
+    }
 
     // TrackProperties wants an array of GUID *'s
     if ((ppguidProp = (const GUID **)LocalAlloc(LMEM_ZEROINIT, sizeof(GUID *) * ulNumProp)) == NULL)
@@ -201,6 +210,14 @@ HRESULT GetDisplayAttributeTrackPropertyRange( //
     if (SUCCEEDED(hr = pic->TrackProperties(ppguidProp, ulNumProp, 0, NULL, &pProp)))
     {
         *ppProp = pProp;
+        OutputDebugString(fmt::format(L"[TSF][DisplayAttr] TrackProperties ok prop={} count={}\n", (void *)pProp, ulNumProp)
+                              .c_str());
+    }
+    else
+    {
+        OutputDebugString(fmt::format(L"[TSF][DisplayAttr] TrackProperties failed hr=0x{:08X}\n",
+                                      static_cast<unsigned int>(hr))
+                              .c_str());
     }
 
     LocalFree(ppguidProp);
@@ -219,13 +236,14 @@ HRESULT GetDisplayAttributeData(TfEditCookie ec, ITfReadOnlyProperty *pProp, ITf
                                 TfGuidAtom *pguid)
 {
     VARIANT var;
-    IEnumTfPropertyValue *pEnumPropertyVal;
-    TF_PROPERTYVAL tfPropVal;
+    IEnumTfPropertyValue *pEnumPropertyVal = NULL;
+    TF_PROPERTYVAL tfPropVal = {};
     GUID guid;
-    TfGuidAtom gaVal;
-    ITfDisplayAttributeInfo *pDAI;
+    TfGuidAtom gaVal = TF_INVALID_GUIDATOM;
+    ITfDisplayAttributeInfo *pDAI = NULL;
 
     HRESULT hr = E_FAIL;
+    VariantInit(&var);
 
     ITfCategoryMgr *pcat = NULL;
     if (FAILED(hr = CoCreateInstance(CLSID_TF_CategoryMgr, NULL, CLSCTX_INPROC_SERVER, IID_ITfCategoryMgr,
@@ -237,14 +255,24 @@ HRESULT GetDisplayAttributeData(TfEditCookie ec, ITfReadOnlyProperty *pProp, ITf
     hr = S_FALSE;
     if (SUCCEEDED(pProp->GetValue(ec, pRange, &var)))
     {
-        OutputDebugString(fmt::format(L"GetDisplayAttributeData01").c_str());
-        if (SUCCEEDED(var.punkVal->QueryInterface(IID_IEnumTfPropertyValue, (void **)&pEnumPropertyVal)))
+        OutputDebugString(fmt::format(L"[TSF][DisplayAttr] GetValue ok vt={}\n", var.vt).c_str());
+        if ((var.vt == VT_UNKNOWN) && var.punkVal &&
+            SUCCEEDED(var.punkVal->QueryInterface(IID_IEnumTfPropertyValue, (void **)&pEnumPropertyVal)))
         {
-            OutputDebugString(fmt::format(L"GetDisplayAttributeData02").c_str());
+            OutputDebugString(L"[TSF][DisplayAttr] property value is IEnumTfPropertyValue\n");
             while (pEnumPropertyVal->Next(1, &tfPropVal, NULL) == S_OK)
             {
                 if (tfPropVal.varValue.vt == VT_EMPTY)
                     continue; // prop has no value over this span
+
+                if ((tfPropVal.varValue.vt != VT_I4) && (tfPropVal.varValue.vt != VT_UI4))
+                {
+                    OutputDebugString(fmt::format(L"[TSF][DisplayAttr] unsupported TF_PROPERTYVAL vt={}\n",
+                                                  tfPropVal.varValue.vt)
+                                          .c_str());
+                    VariantClear(&tfPropVal.varValue);
+                    continue;
+                }
 
                 gaVal = (TfGuidAtom)tfPropVal.varValue.lVal;
 
@@ -252,12 +280,12 @@ HRESULT GetDisplayAttributeData(TfEditCookie ec, ITfReadOnlyProperty *pProp, ITf
 
                 if ((g_pdam != NULL))
                 {
-                    OutputDebugString(fmt::format(L"GetDisplayAttributeData2.5").c_str());
+                    OutputDebugString(fmt::format(L"[TSF][DisplayAttr] guidAtom={}\n", gaVal).c_str());
                 }
 
                 if ((g_pdam != NULL) && SUCCEEDED(g_pdam->GetDisplayAttributeInfo(guid, &pDAI, NULL)))
                 {
-                    OutputDebugString(fmt::format(L"GetDisplayAttributeData03").c_str());
+                    OutputDebugString(L"[TSF][DisplayAttr] GetDisplayAttributeInfo ok\n");
                     //
                     // Issue: for simple apps.
                     //
@@ -278,12 +306,45 @@ HRESULT GetDisplayAttributeData(TfEditCookie ec, ITfReadOnlyProperty *pProp, ITf
 
                     pDAI->Release();
                     hr = S_OK;
+                    VariantClear(&tfPropVal.varValue);
                     break;
                 }
+
+                VariantClear(&tfPropVal.varValue);
             }
             pEnumPropertyVal->Release();
         }
+        else if ((var.vt == VT_I4) || (var.vt == VT_UI4))
+        {
+            gaVal = (TfGuidAtom)var.lVal;
+            OutputDebugString(fmt::format(L"[TSF][DisplayAttr] direct guidAtom value={}\n", gaVal).c_str());
+            if (SUCCEEDED(pcat->GetGUID(gaVal, &guid)) && (g_pdam != NULL) &&
+                SUCCEEDED(g_pdam->GetDisplayAttributeInfo(guid, &pDAI, NULL)))
+            {
+                if (pda)
+                {
+                    pDAI->GetAttributeInfo(pda);
+                    PrintDisplayAttribute(*pda);
+                }
+
+                if (pguid)
+                {
+                    *pguid = gaVal;
+                }
+
+                pDAI->Release();
+                hr = S_OK;
+            }
+        }
+        else
+        {
+            OutputDebugString(fmt::format(L"[TSF][DisplayAttr] unsupported VARIANT vt={}\n", var.vt).c_str());
+        }
         VariantClear(&var);
+    }
+    else
+    {
+        OutputDebugString(L"[TSF][DisplayAttr] GetValue failed\n");
     }
 
     pcat->Release();
