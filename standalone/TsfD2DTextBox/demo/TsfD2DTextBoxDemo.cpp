@@ -7,7 +7,82 @@ namespace
 const wchar_t *kWindowClass = L"TsfD2DTextBoxDemoWindow";
 const wchar_t *kWindowTitle = L"TsfD2DTextBox Demo";
 
-TsfD2DTextBox *g_textBox = nullptr;
+constexpr int kOuterMargin = 20;
+constexpr int kSectionGap = 16;
+constexpr int kSearchTitleHeight = 24;
+constexpr int kRoundedBoxHeight = 68;
+constexpr int kRoundedInset = 10;
+constexpr int kRoundedRadius = 18;
+
+TsfD2DTextBox *g_editorTextBox = nullptr;
+TsfD2DTextBox *g_searchTextBox = nullptr;
+RECT g_searchOuterRect = {};
+
+RECT MakeRect(int left, int top, int right, int bottom)
+{
+    RECT rc = {left, top, right, bottom};
+    return rc;
+}
+
+void LayoutControls(HWND hwnd)
+{
+    RECT rcClient = {};
+    GetClientRect(hwnd, &rcClient);
+
+    const int width = rcClient.right - rcClient.left;
+    const int height = rcClient.bottom - rcClient.top;
+
+    g_searchOuterRect = MakeRect(kOuterMargin, height - kOuterMargin - kRoundedBoxHeight, width - kOuterMargin,
+                                 height - kOuterMargin);
+
+    RECT editorBounds = MakeRect(kOuterMargin, kOuterMargin, width - kOuterMargin,
+                                 g_searchOuterRect.top - kSectionGap - kSearchTitleHeight);
+    RECT searchBounds = MakeRect(g_searchOuterRect.left + kRoundedInset, g_searchOuterRect.top + kRoundedInset,
+                                 g_searchOuterRect.right - kRoundedInset, g_searchOuterRect.bottom - kRoundedInset);
+
+    if (g_editorTextBox)
+    {
+        g_editorTextBox->Move(editorBounds.left, editorBounds.top, editorBounds.right - editorBounds.left,
+                              editorBounds.bottom - editorBounds.top);
+    }
+
+    if (g_searchTextBox)
+    {
+        g_searchTextBox->Move(searchBounds.left, searchBounds.top, searchBounds.right - searchBounds.left,
+                              searchBounds.bottom - searchBounds.top);
+    }
+}
+
+void PaintDemoBackground(HWND hwnd)
+{
+    PAINTSTRUCT ps = {};
+    HDC hdc = BeginPaint(hwnd, &ps);
+
+    RECT rcClient = {};
+    GetClientRect(hwnd, &rcClient);
+
+    HBRUSH backgroundBrush = CreateSolidBrush(RGB(245, 246, 248));
+    FillRect(hdc, &rcClient, backgroundBrush);
+    DeleteObject(backgroundBrush);
+
+    HBRUSH roundedBrush = CreateSolidBrush(RGB(255, 255, 255));
+    HPEN roundedPen = CreatePen(PS_SOLID, 1, RGB(210, 214, 220));
+    HGDIOBJ oldBrush = SelectObject(hdc, roundedBrush);
+    HGDIOBJ oldPen = SelectObject(hdc, roundedPen);
+    RoundRect(hdc, g_searchOuterRect.left, g_searchOuterRect.top, g_searchOuterRect.right, g_searchOuterRect.bottom,
+              kRoundedRadius, kRoundedRadius);
+    SelectObject(hdc, oldPen);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(roundedPen);
+    DeleteObject(roundedBrush);
+
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, RGB(104, 112, 124));
+    TextOutW(hdc, g_searchOuterRect.left + 14, g_searchOuterRect.top - kSearchTitleHeight,
+             L"Rounded Single-Line Text Box", 29);
+
+    EndPaint(hwnd, &ps);
+}
 
 LRESULT CALLBACK DemoWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -15,41 +90,44 @@ LRESULT CALLBACK DemoWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPar
     {
     case WM_CREATE:
     {
-        RECT rcClient = {};
-        GetClientRect(hwnd, &rcClient);
+        g_editorTextBox = new TsfD2DTextBox();
+        g_searchTextBox = new TsfD2DTextBox();
 
-        g_textBox = new TsfD2DTextBox();
-        RECT bounds = {0, 0, rcClient.right, rcClient.bottom};
-        g_textBox->Create(GetModuleHandle(NULL), hwnd, bounds);
+        RECT emptyBounds = MakeRect(0, 0, 0, 0);
+        g_editorTextBox->Create(GetModuleHandle(NULL), hwnd, emptyBounds);
+        g_searchTextBox->Create(GetModuleHandle(NULL), hwnd, emptyBounds);
+        LayoutControls(hwnd);
         return 0;
     }
 
     case WM_SHOWWINDOW:
-        if (wParam && g_textBox && g_textBox->GetHwnd())
+        if (wParam && g_editorTextBox && g_editorTextBox->GetHwnd())
         {
-            SetFocus(g_textBox->GetHwnd());
+            SetFocus(g_editorTextBox->GetHwnd());
         }
         return 0;
 
     case WM_SETFOCUS:
-        if (g_textBox && g_textBox->GetHwnd())
+        if (g_editorTextBox && g_editorTextBox->GetHwnd())
         {
-            SetFocus(g_textBox->GetHwnd());
+            SetFocus(g_editorTextBox->GetHwnd());
         }
         return 0;
 
     case WM_SIZE:
-        if (g_textBox)
-        {
-            RECT rcClient = {};
-            GetClientRect(hwnd, &rcClient);
-            g_textBox->Move(0, 0, rcClient.right, rcClient.bottom);
-        }
+        LayoutControls(hwnd);
+        InvalidateRect(hwnd, NULL, TRUE);
+        return 0;
+
+    case WM_PAINT:
+        PaintDemoBackground(hwnd);
         return 0;
 
     case WM_DESTROY:
-        delete g_textBox;
-        g_textBox = nullptr;
+        delete g_editorTextBox;
+        delete g_searchTextBox;
+        g_editorTextBox = nullptr;
+        g_searchTextBox = nullptr;
         PostQuitMessage(0);
         return 0;
 

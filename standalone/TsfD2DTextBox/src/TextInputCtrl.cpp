@@ -482,6 +482,8 @@ void CTextInputCtrl::OnSetFocus(WPARAM wParam, LPARAM lParam)
 
 void CTextInputCtrl::OnLButtonDown(WPARAM wParam, LPARAM lParam)
 {
+    SetFocus(_hwnd);
+
     if (AleartMouseSink(lParam))
     {
         return;
